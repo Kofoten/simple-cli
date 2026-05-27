@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
     <File Path="LICENSE" />
   </Folder>
   <Project Path="Kofoten.SimpleCli.Generator/Kofoten.SimpleCli.Generator.csproj" Id="0d4ab000-5240-4554-aa54-b7cb7fc46f7e" />

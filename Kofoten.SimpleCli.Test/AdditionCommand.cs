@@ -1,6 +1,9 @@
 ﻿namespace Kofoten.SimpleCli.Test;
 
-internal class AdditionCommand : ICliCommand
+/// <summary>
+/// Adds numbers togheter and prints the result.
+/// </summary>
+public class AdditionCommand : ICliCommand
 {
     [CliArgument(0, nameof(FirstNumber), Description = "The first number to add.")]
     public required int FirstNumber { get; init; }
@@ -62,7 +65,7 @@ internal class AdditionCommand : ICliCommand
     private static void PrintTableStepResult(int sum, ReadOnlySpan<int> remainingNumbers)
     {
         var maxDigits = GetBase10DigitCount(sum);
-        for (int i = 0; i <= remainingNumbers.Length; i++)
+        for (int i = 0; i < remainingNumbers.Length; i++)
         {
             var digits = GetBase10DigitCount(remainingNumbers[i]);
             if (digits > maxDigits)
@@ -73,7 +76,7 @@ internal class AdditionCommand : ICliCommand
 
         var width = 1 + maxDigits;
         Console.WriteLine(sum.ToString().PadLeft(1 + width));
-        for (int i = 0; i <= remainingNumbers.Length; i++)
+        for (int i = 0; i < remainingNumbers.Length; i++)
         {
             Console.Write('+');
             Console.WriteLine(remainingNumbers[i].ToString().PadLeft(width));

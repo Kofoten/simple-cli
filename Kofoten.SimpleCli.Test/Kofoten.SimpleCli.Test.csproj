@@ -9,6 +9,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kofoten.SimpleCli\Kofoten.SimpleCli.csproj" />
+    <ProjectReference Include="..\Kofoten.SimpleCli.Generator\Kofoten.SimpleCli.Generator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
