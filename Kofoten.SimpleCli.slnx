@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="LICENSE" />
+  </Folder>
+  <Project Path="Kofoten.SimpleCli.Generator/Kofoten.SimpleCli.Generator.csproj" Id="0d4ab000-5240-4554-aa54-b7cb7fc46f7e" />
+  <Project Path="Kofoten.SimpleCli.Test/Kofoten.SimpleCli.Test.csproj" Id="aba9f1a7-2851-4b77-9cab-b091a0e013bf" />
+  <Project Path="Kofoten.SimpleCli/Kofoten.SimpleCli.csproj" />
+</Solution>
