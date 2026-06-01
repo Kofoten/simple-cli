@@ -2,15 +2,12 @@
 
 try
 {
-    // The parser class magically exists!
-    var parser = new AdditionCommandParser();
-
     // Let's test the happy path with the greedy collection and both boolean flags
     string[] simulatedArgs = ["10", "20", "-a", "5", "15", "--verbose", "--table"];
 
     Console.WriteLine($"Simulating args: {string.Join(" ", simulatedArgs)}\n");
 
-    var command = parser.Parse(simulatedArgs);
+    var command = AdditionCommandParser.Parse(simulatedArgs);
 
     // Execute your handcrafted logic!
     command.Execute();

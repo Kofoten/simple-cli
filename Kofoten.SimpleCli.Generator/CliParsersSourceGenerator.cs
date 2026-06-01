@@ -2,14 +2,19 @@
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 
 namespace Kofoten.SimpleCli.Generator;
 
 public record CommandModel(
     string Namespace,
     string ClassName,
+    List<ConstructorParameterModel> ConstructorParameters,
     List<PropertyModel> Properties);
+
+public record ConstructorParameterModel(
+    string Name,
+    string TypeName
+);
 
 public record PropertyModel(
     string Name,
@@ -44,40 +49,83 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             return null;
         }
 
+        var compilation = context.SemanticModel.Compilation;
+        var syncCommandSymbol = compilation.GetTypeByMetadataName("Kofoten.SimpleCli.ICliCommand");
+        var asyncCommandSymbol = compilation.GetTypeByMetadataName("Kofoten.SimpleCli.IAsyncCliCommand");
+
         var inheritsCommand = classSymbol.AllInterfaces.Any(interfaceSymbol =>
-            interfaceSymbol.ToDisplayString() == "Kofoten.SimpleCli.ICliCommand"
+            SymbolEqualityComparer.Default.Equals(interfaceSymbol, syncCommandSymbol)
             ||
-            interfaceSymbol.ToDisplayString() == "Kofoten.SimpleCli.IAsyncCliCommand");
+            SymbolEqualityComparer.Default.Equals(interfaceSymbol, asyncCommandSymbol));
 
         if (!inheritsCommand)
         {
             return null;
         }
 
-        var properties = new List<PropertyModel>();
+        var publicConstructors = classSymbol.Constructors
+            .Where(c => c.DeclaredAccessibility == Accessibility.Public)
+            .ToList();
 
+        if (publicConstructors.Count != 1)
+        {
+            // Enforce opinion: We only support exactly ONE public constructor.
+            // TODO: Emit Diagnostic descriptor here for better DX.
+            return null;
+        }
+
+        var constructorParams = new List<ConstructorParameterModel>();
+        foreach (var param in publicConstructors[0].Parameters)
+        {
+            constructorParams.Add(new ConstructorParameterModel(
+                Name: param.Name,
+                TypeName: param.Type.ToDisplayString()
+            ));
+        }
+
+        var argAttributeSymbol = compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliArgumentAttribute");
+        var optAttributeSymbol = compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliOptionAttribute");
+
+        var enumerableSymbol = compilation.GetTypeByMetadataName("System.Collections.Generic.IEnumerable`1");
+
+        var properties = new List<PropertyModel>();
         foreach (var member in classSymbol.GetMembers().OfType<IPropertySymbol>())
         {
-            var argAttribute = member.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name == "CliArgumentAttribute");
-            var optAttribute = member.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name == "CliOptionAttribute");
+            var argAttribute = member.GetAttributes().FirstOrDefault(a =>
+                SymbolEqualityComparer.Default.Equals(a.AttributeClass, argAttributeSymbol));
 
-            if (argAttribute != null)
+            var optAttribute = member.GetAttributes().FirstOrDefault(a =>
+                SymbolEqualityComparer.Default.Equals(a.AttributeClass, optAttributeSymbol));
+
+            bool isCollection = false;
+            if (member.Type is INamedTypeSymbol namedType && namedType.IsGenericType)
             {
-                int position = (int)argAttribute.ConstructorArguments[0].Value!;
+                isCollection = SymbolEqualityComparer.Default.Equals(namedType.OriginalDefinition, enumerableSymbol);
+            }
+
+            if (argAttribute != null
+                &&
+                argAttribute.ConstructorArguments.Length > 0
+                &&
+                argAttribute.ConstructorArguments[0].Value is int position)
+            {
                 properties.Add(new PropertyModel(
                     Name: member.Name,
                     TypeName: member.Type.ToDisplayString(),
                     IsRequired: member.IsRequired,
-                    IsCollection: member.Type.ToDisplayString().StartsWith("System.Collections.Generic.IEnumerable"),
+                    IsCollection: isCollection,
                     IsOption: false,
                     Position: position,
                     OptionName: null,
                     ShortName: null
                 ));
             }
-            else if (optAttribute != null)
+            else if (optAttribute != null
+                &&
+                optAttribute.ConstructorArguments.Length > 0
+                &&
+                optAttribute.ConstructorArguments[0].Value is string optName)
             {
-                string optName = (string)optAttribute.ConstructorArguments[0].Value!;
                 var shortArg = optAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Short");
                 char? shortName = shortArg.Value.Value is char c && c != '\0' ? c : null;
 
@@ -85,7 +133,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     Name: member.Name,
                     TypeName: member.Type.ToDisplayString(),
                     IsRequired: member.IsRequired,
-                    IsCollection: member.Type.ToDisplayString().StartsWith("System.Collections.Generic.IEnumerable"),
+                    IsCollection: isCollection,
                     IsOption: true,
                     Position: -1,
                     OptionName: optName,
@@ -97,201 +145,270 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         return new CommandModel(
             Namespace: classSymbol.ContainingNamespace.ToDisplayString(),
             ClassName: classSymbol.Name,
+            ConstructorParameters: constructorParams,
             Properties: properties
         );
     }
 
     private static void GenerateParser(SourceProductionContext context, CommandModel command)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("// <auto-generated/>");
-        sb.AppendLine("#nullable enable");
-        sb.AppendLine("using System;");
-        sb.AppendLine("using System.Collections.Generic;");
-        sb.AppendLine();
-        sb.AppendLine($"namespace {command.Namespace};");
-        sb.AppendLine();
-        sb.AppendLine($"public class {command.ClassName}Parser");
-        sb.AppendLine("{");
-        sb.AppendLine($"    public {command.ClassName} Parse(string[] args)");
-        sb.AppendLine("    {");
-        sb.AppendLine("        List<Exception> errors = [];");
-        sb.AppendLine();
-
-        var arguments = command.Properties.Where(p => !p.IsOption).OrderBy(p => p.Position).ToList();
-        var options = command.Properties.Where(p => p.IsOption).ToList();
-
-        // --- 1. POSITIONAL ARGUMENTS ---
-        foreach (var arg in arguments)
+        var code = new CodeBuilder();
+        code.AppendLine("// <auto-generated/>");
+        code.AppendLine("#nullable enable");
+        code.AppendLine("using System;");
+        code.AppendLine("using System.Collections.Generic;");
+        code.AppendLine();
+        code.AppendLine($"namespace {command.Namespace};");
+        code.AppendLine();
+        code.AppendLine($"public static class {command.ClassName}Parser");
+        using (code.StartBlock())
         {
-            sb.AppendLine($"        {arg.TypeName} arg_{arg.Name} = default!;");
-            sb.AppendLine($"        if (args.Length > {arg.Position})");
-            sb.AppendLine("        {");
-            if (arg.TypeName == "int")
+            code.Append($"public static {command.ClassName} Parse(string[] args", applyIndent: true);
+
+            foreach (var ctorParam in command.ConstructorParameters)
             {
-                sb.AppendLine($"            if (!int.TryParse(args[{arg.Position}], out arg_{arg.Name}))");
-                sb.AppendLine("            {");
-                sb.AppendLine($"                errors.Add(new ArgumentException(\"Argument {arg.Name} is not an integer\"));");
-                sb.AppendLine("            }");
+                code.Append($", {ctorParam.TypeName} {ctorParam.Name}");
             }
-            else
+
+            code.AppendLine($")", applyIndent: false);
+
+            using (code.StartBlock())
             {
-                sb.AppendLine($"            arg_{arg.Name} = args[{arg.Position}];");
-            }
-            sb.AppendLine("        }");
+                code.AppendLine("List<Exception> errors = [];");
+                code.AppendLine();
 
-            if (arg.IsRequired)
-            {
-                sb.AppendLine("        else");
-                sb.AppendLine("        {");
-                sb.AppendLine($"            errors.Add(new ArgumentException(\"Missing required argument {arg.Name}\"));");
-                sb.AppendLine("        }");
-            }
-            sb.AppendLine();
-        }
-
-        // --- 2. OPTION VARIABLES ---
-        foreach (var opt in options)
-        {
-            if (opt.IsCollection)
-            {
-                var innerType = opt.TypeName.Replace("System.Collections.Generic.IEnumerable<", "").TrimEnd('>');
-                sb.AppendLine($"        List<{innerType}> opt_{opt.Name} = [];");
-            }
-            else if (opt.TypeName == "bool")
-            {
-                sb.AppendLine($"        bool opt_{opt.Name} = false;");
-            }
-            else
-            {
-                sb.AppendLine($"        {opt.TypeName} opt_{opt.Name} = default!;");
-            }
-        }
-
-        sb.AppendLine();
-
-        // --- 3. STATE MACHINE LOOP ---
-        sb.AppendLine("        int state = 0;");
-        sb.AppendLine($"        for (int i = {arguments.Count}; i < args.Length; i++)");
-        sb.AppendLine("        {");
-        sb.AppendLine("            switch (args[i])");
-        sb.AppendLine("            {");
-
-        // Phase A: Flag Matching
-        for (int i = 0; i < options.Count; i++)
-        {
-            var opt = options[i];
-            int stateId = i + 1;
-
-            if (!string.IsNullOrEmpty(opt.OptionName)) sb.AppendLine($"                case \"--{opt.OptionName}\":");
-            if (opt.ShortName.HasValue) sb.AppendLine($"                case \"-{opt.ShortName}\":");
-
-            sb.AppendLine($"                    state = {stateId};");
-            if (opt.TypeName == "bool")
-            {
-                sb.AppendLine($"                    opt_{opt.Name} = true;");
-            }
-            sb.AppendLine("                    continue;");
-        }
-
-        sb.AppendLine("                default:");
-        sb.AppendLine("                    break;");
-        sb.AppendLine("            }");
-        sb.AppendLine();
-
-        // Phase B: Value Parsing
-        sb.AppendLine("            switch (state)");
-        sb.AppendLine("            {");
-
-        for (int i = 0; i < options.Count; i++)
-        {
-            var opt = options[i];
-            int stateId = i + 1;
-
-            sb.AppendLine($"                case {stateId}:");
-            sb.AppendLine("                    {"); // Explicit scoping for local 'v' variables
-
-            if (opt.IsCollection)
-            {
-                var innerType = opt.TypeName.Replace("System.Collections.Generic.IEnumerable<", "").TrimEnd('>');
-                if (innerType == "int")
+                var arguments = command.Properties.Where(p => !p.IsOption).OrderBy(p => p.Position).ToList();
+                foreach (var arg in arguments)
                 {
-                    sb.AppendLine($"                        if (int.TryParse(args[i], out int v))");
-                    sb.AppendLine("                        {");
-                    sb.AppendLine($"                            opt_{opt.Name}.Add(v);");
-                    sb.AppendLine("                        }");
-                    sb.AppendLine("                        else");
-                    sb.AppendLine("                        {");
-                    sb.AppendLine($"                            errors.Add(new ArgumentException($\"Invalid {innerType} value ({{args[i]}}) for option '--{opt.OptionName}' at position {{i}}.\"));");
-                    sb.AppendLine("                        }");
+                    code.AppendLine($"{arg.TypeName} arg_{arg.Name} = default!;");
+                    code.AppendLine($"if (args.Length > {arg.Position})");
+                    using (code.StartBlock())
+                    {
+                        switch (arg.TypeName)
+                        {
+                            case "int":
+                                IntArgumentParserGenerator(code, arg);
+                                break;
+                            case "string":
+                            default:
+                                code.AppendLine($"arg_{arg.Name} = args[{arg.Position}];");
+                                break;
+
+                        }
+                    }
+
+                    if (arg.IsRequired)
+                    {
+                        code.AppendLine("else");
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine($"errors.Add(new ArgumentException(\"Missing required argument {arg.Name}\"));");
+                        }
+                    }
+
+                    code.AppendLine();
                 }
-                else
+
+                var options = command.Properties.Where(p => p.IsOption).ToList();
+                foreach (var opt in options)
                 {
-                    sb.AppendLine($"                        opt_{opt.Name}.Add(args[i]);");
+                    if (opt.IsCollection)
+                    {
+                        var innerType = opt.TypeName.Replace("System.Collections.Generic.IEnumerable<", "").TrimEnd('>');
+                        code.AppendLine($"List<{innerType}> opt_{opt.Name} = [];");
+                    }
+                    else if (opt.TypeName == "bool")
+                    {
+                        code.AppendLine($"bool opt_{opt.Name} = false;");
+                    }
+                    else
+                    {
+                        code.AppendLine($"{opt.TypeName} opt_{opt.Name} = default!;");
+                    }
+
+                    code.AppendLine();
                 }
-                sb.AppendLine("                    }");
-                sb.AppendLine("                    break;"); // Remains greedy, no state reset!
-            }
-            else if (opt.TypeName == "bool")
-            {
-                sb.AppendLine($"                        if (bool.TryParse(args[i], out bool v))");
-                sb.AppendLine("                        {");
-                sb.AppendLine($"                            opt_{opt.Name} = v;");
-                sb.AppendLine("                        }");
-                sb.AppendLine("                        else");
-                sb.AppendLine("                        {");
-                sb.AppendLine($"                            errors.Add(new ArgumentException($\"Invalid boolean value ({{args[i]}}) for option '--{opt.OptionName}' at position {{i}}.\"));");
-                sb.AppendLine("                        }");
-                sb.AppendLine("                    }");
-                sb.AppendLine("                    state = 0;"); // Reset state
-                sb.AppendLine("                    break;");
-            }
-            else // Single value string/int options
-            {
-                if (opt.TypeName == "int")
+
+                code.AppendLine("int state = 0;");
+                code.AppendLine($"for (int i = {arguments.Count}; i < args.Length; i++)");
+                using (code.StartBlock())
                 {
-                    sb.AppendLine($"                        if (int.TryParse(args[i], out int v))");
-                    sb.AppendLine("                        {");
-                    sb.AppendLine($"                            opt_{opt.Name} = v;");
-                    sb.AppendLine("                        }");
-                    sb.AppendLine("                        else");
-                    sb.AppendLine("                        {");
-                    sb.AppendLine($"                            errors.Add(new ArgumentException($\"Invalid integer value ({{args[i]}}) for option '--{opt.OptionName}' at position {{i}}.\"));");
-                    sb.AppendLine("                        }");
+                    code.AppendLine("switch (args[i])");
+                    using (code.StartBlock())
+                    {
+                        for (int i = 0; i < options.Count; i++)
+                        {
+                            var opt = options[i];
+                            int stateId = i + 1;
+
+                            if (!string.IsNullOrEmpty(opt.OptionName))
+                            {
+                                code.AppendLine($"case \"--{opt.OptionName}\":");
+                            }
+
+                            if (opt.ShortName.HasValue)
+                            {
+                                code.AppendLine($"case \"-{opt.ShortName}\":");
+                            }
+
+                            using (code.Indent())
+                            {
+                                code.AppendLine($"state = {stateId};");
+                                if (opt.TypeName == "bool")
+                                {
+                                    code.AppendLine($"opt_{opt.Name} = true;");
+                                }
+                                code.AppendLine("continue;");
+                            }
+                        }
+
+
+                        code.AppendLine("default:");
+                        using (code.Indent())
+                        {
+                            code.AppendLine("break;");
+                        }
+                    }
+
+                    code.AppendLine();
+                    code.AppendLine("switch (state)");
+                    using (code.StartBlock())
+                    {
+                        for (int i = 0; i < options.Count; i++)
+                        {
+                            var opt = options[i];
+                            int stateId = i + 1;
+
+                            code.AppendLine($"case {stateId}:");
+                            using (code.Indent())
+                            {
+                                if (opt.IsCollection)
+                                {
+                                    var innerType = opt.TypeName.Replace("System.Collections.Generic.IEnumerable<", "").TrimEnd('>');
+                                    switch (innerType)
+                                    {
+                                        case "int":
+                                            using (code.StartBlock())
+                                            {
+                                                IntCollectionParserGenerator(code, opt);
+                                            }
+                                            break;
+                                        case "string":
+                                        default:
+                                            code.AppendLine($"opt_{opt.Name}.Add(args[i]);");
+                                            break;
+                                    }
+                                }
+                                else
+                                {
+                                    switch (opt.TypeName)
+                                    {
+                                        case "bool":
+                                            using (code.StartBlock())
+                                            {
+                                                BoolOptionParserGenerator(code, opt);
+                                            }
+                                            break;
+                                        case "int":
+                                            using (code.StartBlock())
+                                            {
+                                                IntOptionParserGenerator(code, opt);
+                                            }
+                                            break;
+                                        case "string":
+                                        default:
+                                            code.AppendLine($"opt_{opt.Name} = args[i];");
+                                            break;
+                                    }
+
+                                    code.AppendLine("state = 0;");
+                                }
+
+                                code.AppendLine("break;");
+                            }
+                        }
+
+                        code.AppendLine("default:");
+                        using (code.Indent())
+                        {
+                            code.AppendLine("break;");
+                        }
+                    }
                 }
-                else
+
+                code.AppendLine();
+                code.AppendLine("if (errors.Count == 0)");
+                using (code.StartBlock())
                 {
-                    sb.AppendLine($"                        opt_{opt.Name} = args[i];");
+                    var ctorArgs = string.Join(", ", command.ConstructorParameters.Select(p => p.Name));
+                    code.AppendLine($"return new {command.ClassName}({ctorArgs})");
+                    code.AppendLine("{");
+                    using (code.Indent())
+                    {
+                        foreach (var prop in command.Properties)
+                        {
+                            string prefix = prop.IsOption ? "opt_" : "arg_";
+                            code.AppendLine($"{prop.Name} = {prefix}{prop.Name},");
+                        }
+                    }
+                    code.AppendLine("};");
                 }
-                sb.AppendLine("                    }");
-                sb.AppendLine("                    state = 0;"); // Reset state
-                sb.AppendLine("                    break;");
+
+                code.AppendLine("throw new AggregateException(errors);");
             }
         }
 
-        sb.AppendLine("                default:");
-        sb.AppendLine("                    break;");
-        sb.AppendLine("            }");
-        sb.AppendLine("        }");
-        sb.AppendLine();
+        context.AddSource($"{command.ClassName}Parser.g.cs", code.ToString());
+    }
 
-        // --- 4. RETURN BLOCK ---
-        sb.AppendLine("        if (errors.Count == 0)");
-        sb.AppendLine("        {");
-        sb.AppendLine($"            return new {command.ClassName}()");
-        sb.AppendLine("            {");
-        foreach (var prop in command.Properties)
+    private static void IntArgumentParserGenerator(CodeBuilder code, PropertyModel model)
+    {
+        code.AppendLine($"if (!int.TryParse(args[{model.Position}], out arg_{model.Name}))");
+        using (code.StartBlock())
         {
-            string prefix = prop.IsOption ? "opt_" : "arg_";
-            sb.AppendLine($"                {prop.Name} = {prefix}{prop.Name},");
+            code.AppendLine($"errors.Add(new ArgumentException(\"Argument {model.Name} is not an integer\"));");
         }
-        sb.AppendLine("            };");
-        sb.AppendLine("        }");
-        sb.AppendLine();
-        sb.AppendLine("        throw new AggregateException(errors);");
-        sb.AppendLine("    }");
-        sb.AppendLine("}");
+    }
 
-        context.AddSource($"{command.ClassName}Parser.g.cs", sb.ToString());
+    private static void IntOptionParserGenerator(CodeBuilder code, PropertyModel model)
+    {
+        code.AppendLine($"if (int.TryParse(args[i], out int v))");
+        using (code.StartBlock())
+        {
+            code.AppendLine($"opt_{model.Name} = v;");
+        }
+        code.AppendLine("else");
+        using (code.StartBlock())
+        {
+            code.AppendLine($"errors.Add(new ArgumentException($\"Invalid integer value ({{args[i]}}) for option '--{model.OptionName}' at position {{i}}.\"));");
+        }
+    }
+
+    private static void IntCollectionParserGenerator(CodeBuilder code, PropertyModel model)
+    {
+        code.AppendLine($"if (int.TryParse(args[i], out int v))");
+        using (code.StartBlock())
+        {
+            code.AppendLine($"opt_{model.Name}.Add(v);");
+        }
+        code.AppendLine("else");
+        using (code.StartBlock())
+        {
+            code.AppendLine($"errors.Add(new ArgumentException($\"Invalid integer value ({{args[i]}}) for option '--{model.OptionName}' at position {{i}}.\"));");
+        }
+    }
+
+    private static void BoolOptionParserGenerator(CodeBuilder code, PropertyModel model)
+    {
+        code.AppendLine($"if (bool.TryParse(args[i], out bool v))");
+        using (code.StartBlock())
+        {
+            code.AppendLine($"opt_{model.Name} = v;");
+        }
+        code.AppendLine("else");
+        using (code.StartBlock())
+        {
+            code.AppendLine($"errors.Add(new ArgumentException($\"Invalid boolean value ({{args[i]}}) for option '--{model.OptionName}' at position {{i}}.\"));");
+        }
     }
 }
