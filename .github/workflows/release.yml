@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: simple-cli-arc-runner
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Ensure Tag is on Main
+        run: ensure-main.sh
+
+      - name: Validate Increasing Version
+        run: validate-increasing-version.sh
+
+      - name: Set Clean Version
+        shell: bash
+        run: set-clean-version.sh
+
+      - name: Authenticate with NuGet.org
+        uses: NuGet/login@v1
+        id: nuget_login
+        with:
+          user: RasmusSteen
+
+      - name: Restore Dependencies
+        run: dotnet restore -p:Version=${{ env.SEMVER }}
+
+      - name: Build
+        run: dotnet build --no-restore -p:Version=${{ env.SEMVER }}
+
+      - name: Run Tests
+        run: dotnet run --verbosity normal --project ./Kofoten.SimpleCli.Test/Kofoten.SimpleCli.Test.csproj -p:Version=${{ env.SEMVER }}
+
+      - name: Pack Kofoten.SimpleCli
+        run: dotnet pack Kofoten.SimpleCli/Kofoten.SimpleCli.csproj -c Release -o ./nupkg -p:Version=${{ env.SEMVER }}
+
+      - name: Publish Kofoten.SimpleCli to NuGet
+        run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ steps.nuget_login.outputs.NUGET_API_KEY }} --skip-duplicate
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Release ${{ env.VERSION }}
+          body: |
+            **NuGet Package**: [Kofoten.SimpleCli ${{ env.SEMVER }}](https://www.nuget.org/packages/Kofoten.SimpleCli/${{ env.SEMVER }})
+          generate_release_notes: true
