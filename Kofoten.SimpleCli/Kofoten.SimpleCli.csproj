@@ -4,13 +4,16 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <LangVersion>12.0</LangVersion>
     <Nullable>enable</Nullable>
-
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
     <IsPackable>true</IsPackable>
     <PackageId>Kofoten.SimpleCli</PackageId>
     <Authors>Rasmus Steen</Authors>
     <Description>A zero-dependency, allocation-friendly CLI parser powered by Roslyn Source Generators.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/Kofoten/simple-cli</RepositoryUrl>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/Kofoten/simple-cli</PackageProjectUrl>
+	<RepositoryUrl>https://github.com/Kofoten/simple-cli</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
