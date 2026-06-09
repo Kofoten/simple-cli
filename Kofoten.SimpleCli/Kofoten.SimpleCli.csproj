@@ -15,15 +15,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Kofoten.SimpleCli.Generator\Kofoten.SimpleCli.Generator.csproj"
-                      ReferenceOutputAssembly="false"
-                      OutputItemType="Analyzer" />
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" />
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
-     <None Include="..\Kofoten.SimpleCli.Generator\bin\$(Configuration)\netstandard2.0\Kofoten.SimpleCli.Generator.dll"
-           Pack="true"
-           PackagePath="analyzers\dotnet\cs"
-           Visible="false" />
+    <ProjectReference Include="..\Kofoten.SimpleCli.Generator\Kofoten.SimpleCli.Generator.csproj" ReferenceOutputAssembly="false" OutputItemType="Analyzer" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\Kofoten.SimpleCli.Generator\bin\$(Configuration)\netstandard2.0\Kofoten.SimpleCli.Generator.dll" Pack="true" PackagePath="analyzers\dotnet\cs" Visible="false" />
   </ItemGroup>
 </Project>
