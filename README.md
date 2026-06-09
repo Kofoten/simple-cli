@@ -1,0 +1,1 @@
+# Kofoten.SimpleCli
