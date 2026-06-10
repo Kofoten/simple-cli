@@ -3,7 +3,7 @@
 /// <summary>
 /// Adds numbers togheter and prints the result.
 /// </summary>
-public class AdditionCommand : ICliCommand
+public class AdditionCommand(object imaginaryService) : ICliCommand
 {
     [CliArgument(0, nameof(FirstNumber), Description = "The first number to add.")]
     public required int FirstNumber { get; init; }

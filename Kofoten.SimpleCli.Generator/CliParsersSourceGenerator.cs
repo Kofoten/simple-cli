@@ -182,7 +182,6 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         code.AppendLine("#nullable enable");
         code.AppendLine();
         code.AppendLine("using System;");
-        code.AppendLine("using System.Collections.Generic;");
         code.AppendLine();
         code.AppendLine($"namespace {command.Namespace};");
         code.AppendLine();
@@ -201,7 +200,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
             using (code.StartBlock())
             {
-                code.AppendLine("List<string> errors = [];");
+                code.AppendLine("global::System.Collections.Generic.List<string> errors = new global::System.Collections.Generic.List<string>();");
                 code.AppendLine();
 
                 var arguments = command.Properties.OfType<ArgumentPropertyModel>().OrderBy(p => p.Position).ToList();
@@ -249,7 +248,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 {
                     if (opt.IsCollection)
                     {
-                        code.AppendLine($"List<{opt.ParseTypeName}> opt_{opt.Name} = [];");
+                        code.AppendLine($"global::System.Collections.Generic.List<{opt.ParseTypeName}> opt_{opt.Name} = new global::System.Collections.Generic.List<{opt.ParseTypeName}>();");
                     }
                     else if (opt.TypeName == "bool")
                     {
@@ -259,10 +258,9 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     {
                         code.AppendLine($"{opt.TypeName} opt_{opt.Name} = default!;");
                     }
-
-                    code.AppendLine();
                 }
 
+                code.AppendLine();
                 code.AppendLine("int state = 0;");
                 code.AppendLine($"for (int i = {arguments.Count}; i < args.Length; i++)");
                 using (code.StartBlock())
@@ -379,7 +377,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
 
                 code.AppendLine();
-                code.AppendLine("StringBuilder messageBuilder = new StringBuilder();");
+                code.AppendLine("global::System.Text.StringBuilder messageBuilder = new global::System.Text.StringBuilder();");
                 code.AppendLine("messageBuilder.AppendLine(\"Failed to parse arguments:\");");
                 code.AppendLine("foreach (string error in errors)");
                 using (code.StartBlock())
