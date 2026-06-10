@@ -1,31 +1,10 @@
-﻿using Microsoft.CodeAnalysis;
+﻿using Kofoten.SimpleCli.Generator.Data;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace Kofoten.SimpleCli.Generator;
-
-public record CommandModel(
-    string Namespace,
-    string ClassName,
-    List<ConstructorParameterModel> ConstructorParameters,
-    List<PropertyModel> Properties);
-
-public record ConstructorParameterModel(
-    string Name,
-    string TypeName
-);
-
-public record PropertyModel(
-    string Name,
-    string TypeName,
-    bool IsRequired,
-    bool IsCollection,
-    bool IsOption,
-    int Position,
-    string? OptionName,
-    char? ShortName
-);
 
 [Generator]
 public class CliParsersSourceGenerator : IIncrementalGenerator
@@ -40,6 +19,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
         context.RegisterSourceOutput(commandModels, static (spc, source) => GenerateParser(spc, source!));
     }
+
+    #region BuildCommandModel
 
     private static CommandModel? GetCommandTarget(GeneratorSyntaxContext context)
     {
@@ -97,10 +78,20 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             var optAttribute = member.GetAttributes().FirstOrDefault(a =>
                 SymbolEqualityComparer.Default.Equals(a.AttributeClass, optAttributeSymbol));
 
+            string typeName = member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            string parseTypeName = typeName;
+
             bool isCollection = false;
-            if (member.Type is INamedTypeSymbol namedType && namedType.IsGenericType)
+            if (TryGetEnumerableElementType(member.Type, compilation, out var elementType))
             {
-                isCollection = SymbolEqualityComparer.Default.Equals(namedType.OriginalDefinition, enumerableSymbol);
+                if (elementType is null)
+                {
+                    // TODO: Emit Diagnostic descriptor here for better DX.
+                    return null;
+                }
+
+                parseTypeName = elementType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                isCollection = true;
             }
 
             if (argAttribute != null
@@ -109,16 +100,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 &&
                 argAttribute.ConstructorArguments[0].Value is int position)
             {
-                properties.Add(new PropertyModel(
+                properties.Add(new ArgumentPropertyModel(
                     Name: member.Name,
-                    TypeName: member.Type.ToDisplayString(),
+                    TypeName: typeName,
+                    ParseTypeName: parseTypeName,
                     IsRequired: member.IsRequired,
-                    IsCollection: isCollection,
-                    IsOption: false,
-                    Position: position,
-                    OptionName: null,
-                    ShortName: null
-                ));
+                    Position: position));
             }
             else if (optAttribute != null
                 &&
@@ -129,16 +116,14 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 var shortArg = optAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Short");
                 char? shortName = shortArg.Value.Value is char c && c != '\0' ? c : null;
 
-                properties.Add(new PropertyModel(
+                properties.Add(new OptionPropertyModel(
                     Name: member.Name,
-                    TypeName: member.Type.ToDisplayString(),
+                    TypeName: typeName,
+                    ParseTypeName: parseTypeName,
                     IsRequired: member.IsRequired,
-                    IsCollection: isCollection,
-                    IsOption: true,
-                    Position: -1,
                     OptionName: optName,
-                    ShortName: shortName
-                ));
+                    ShortName: shortName,
+                    IsCollection: isCollection));
             }
         }
 
@@ -150,17 +135,59 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         );
     }
 
+    private static bool TryGetEnumerableElementType(
+        ITypeSymbol type,
+        Compilation compilation,
+        out ITypeSymbol? elementType)
+    {
+        elementType = null;
+
+        var ienumerableOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IEnumerable`1");
+        if (ienumerableOfT is null)
+        {
+            return false;
+        }
+
+        if (type is INamedTypeSymbol named &&
+            named.IsGenericType &&
+            SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, ienumerableOfT))
+        {
+            elementType = named.TypeArguments[0];
+            return true;
+        }
+
+        foreach (var iface in type.AllInterfaces)
+        {
+            if (iface is INamedTypeSymbol i &&
+                i.IsGenericType &&
+                SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, ienumerableOfT))
+            {
+                elementType = i.TypeArguments[0];
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    #endregion
+
+    #region ParserGenerator
+
     private static void GenerateParser(SourceProductionContext context, CommandModel command)
     {
         var code = new CodeBuilder();
         code.AppendLine("// <auto-generated/>");
+        code.AppendLine();
         code.AppendLine("#nullable enable");
+        code.AppendLine();
         code.AppendLine("using System;");
         code.AppendLine("using System.Collections.Generic;");
         code.AppendLine();
         code.AppendLine($"namespace {command.Namespace};");
         code.AppendLine();
         code.AppendLine($"public static class {command.ClassName}Parser");
+
         using (code.StartBlock())
         {
             code.Append($"public static {command.ClassName} Parse(string[] args", applyIndent: true);
@@ -174,10 +201,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
             using (code.StartBlock())
             {
-                code.AppendLine("List<Exception> errors = [];");
+                code.AppendLine("List<string> errors = [];");
                 code.AppendLine();
 
-                var arguments = command.Properties.Where(p => !p.IsOption).OrderBy(p => p.Position).ToList();
+                var arguments = command.Properties.OfType<ArgumentPropertyModel>().OrderBy(p => p.Position).ToList();
                 foreach (var arg in arguments)
                 {
                     code.AppendLine($"{arg.TypeName} arg_{arg.Name} = default!;");
@@ -187,7 +214,15 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         switch (arg.TypeName)
                         {
                             case "int":
-                                IntArgumentParserGenerator(code, arg);
+                            case "Int32":
+                            case "short":
+                            case "long":
+                            case "Int64":
+                            case "byte":
+                            case "uint":
+                            case "ulong":
+                            case "ushort":
+                                TryParseParserGenerator(code, arg);
                                 break;
                             case "string":
                             default:
@@ -202,20 +237,19 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         code.AppendLine("else");
                         using (code.StartBlock())
                         {
-                            code.AppendLine($"errors.Add(new ArgumentException(\"Missing required argument {arg.Name}\"));");
+                            code.AppendLine($"errors.Add(\"Missing required argument {arg.Name}\");");
                         }
                     }
 
                     code.AppendLine();
                 }
 
-                var options = command.Properties.Where(p => p.IsOption).ToList();
+                var options = command.Properties.OfType<OptionPropertyModel>().ToList();
                 foreach (var opt in options)
                 {
                     if (opt.IsCollection)
                     {
-                        var innerType = opt.TypeName.Replace("System.Collections.Generic.IEnumerable<", "").TrimEnd('>');
-                        code.AppendLine($"List<{innerType}> opt_{opt.Name} = [];");
+                        code.AppendLine($"List<{opt.ParseTypeName}> opt_{opt.Name} = [];");
                     }
                     else if (opt.TypeName == "bool")
                     {
@@ -282,45 +316,31 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             code.AppendLine($"case {stateId}:");
                             using (code.Indent())
                             {
-                                if (opt.IsCollection)
+                                switch (opt.ParseTypeName)
                                 {
-                                    var innerType = opt.TypeName.Replace("System.Collections.Generic.IEnumerable<", "").TrimEnd('>');
-                                    switch (innerType)
-                                    {
-                                        case "int":
-                                            using (code.StartBlock())
-                                            {
-                                                IntCollectionParserGenerator(code, opt);
-                                            }
-                                            break;
-                                        case "string":
-                                        default:
+                                    case "bool":
+                                    case "int":
+                                    case "Int32":
+                                        using (code.StartBlock())
+                                        {
+                                            TryParseParserGenerator(code, opt);
+                                        }
+                                        break;
+                                    case "string":
+                                    default:
+                                        if (opt.IsCollection)
+                                        {
                                             code.AppendLine($"opt_{opt.Name}.Add(args[i]);");
-                                            break;
-                                    }
-                                }
-                                else
-                                {
-                                    switch (opt.TypeName)
-                                    {
-                                        case "bool":
-                                            using (code.StartBlock())
-                                            {
-                                                BoolOptionParserGenerator(code, opt);
-                                            }
-                                            break;
-                                        case "int":
-                                            using (code.StartBlock())
-                                            {
-                                                IntOptionParserGenerator(code, opt);
-                                            }
-                                            break;
-                                        case "string":
-                                        default:
+                                        }
+                                        else
+                                        {
                                             code.AppendLine($"opt_{opt.Name} = args[i];");
-                                            break;
-                                    }
+                                        }
+                                        break;
+                                }
 
+                                if (!opt.IsCollection)
+                                {
                                     code.AppendLine("state = 0;");
                                 }
 
@@ -347,68 +367,66 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     {
                         foreach (var prop in command.Properties)
                         {
-                            string prefix = prop.IsOption ? "opt_" : "arg_";
-                            code.AppendLine($"{prop.Name} = {prefix}{prop.Name},");
+                            code.AppendLine(prop switch
+                            {
+                                ArgumentPropertyModel apm => $"{prop.Name} = arg_{prop.Name},",
+                                OptionPropertyModel opm => $"{prop.Name} = opt_{prop.Name},",
+                                _ => "// Unknown model",
+                            });
                         }
                     }
                     code.AppendLine("};");
                 }
 
-                code.AppendLine("throw new AggregateException(errors);");
+                code.AppendLine();
+                code.AppendLine("StringBuilder messageBuilder = new StringBuilder();");
+                code.AppendLine("messageBuilder.AppendLine(\"Failed to parse arguments:\");");
+                code.AppendLine("foreach (string error in errors)");
+                using (code.StartBlock())
+                {
+                    code.AppendLine("messageBuilder.AppendLine($\"\\t{error}\");");
+                }
+                code.AppendLine("throw new ArgumentException(messageBuilder.ToString());");
             }
         }
 
         context.AddSource($"{command.ClassName}Parser.g.cs", code.ToString());
     }
 
-    private static void IntArgumentParserGenerator(CodeBuilder code, PropertyModel model)
+    private static void TryParseParserGenerator(CodeBuilder code, PropertyModel model)
     {
-        code.AppendLine($"if (!int.TryParse(args[{model.Position}], out arg_{model.Name}))");
-        using (code.StartBlock())
+        switch (model)
         {
-            code.AppendLine($"errors.Add(new ArgumentException(\"Argument {model.Name} is not an integer\"));");
+            case ArgumentPropertyModel argModel:
+                code.AppendLine($"if (!{argModel.ParseTypeName}.TryParse(args[{argModel.Position}], out arg_{argModel.Name}))");
+                using (code.StartBlock())
+                {
+                    code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ParseTypeName}\");");
+                }
+                break;
+            case OptionPropertyModel optModel:
+                code.AppendLine($"if ({optModel.ParseTypeName}.TryParse(args[i], out {optModel.ParseTypeName} v))");
+                using (code.StartBlock())
+                {
+                    if (model.IsCollection)
+                    {
+                        code.AppendLine($"opt_{optModel.Name}.Add(v);");
+                    }
+                    else
+                    {
+                        code.AppendLine($"opt_{optModel.Name} = v;");
+                    }
+                }
+                code.AppendLine("else");
+                using (code.StartBlock())
+                {
+                    code.AppendLine($"errors.Add($\"Invalid {optModel.ParseTypeName} value ({{args[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                }
+                break;
+            default:
+                break;
         }
     }
 
-    private static void IntOptionParserGenerator(CodeBuilder code, PropertyModel model)
-    {
-        code.AppendLine($"if (int.TryParse(args[i], out int v))");
-        using (code.StartBlock())
-        {
-            code.AppendLine($"opt_{model.Name} = v;");
-        }
-        code.AppendLine("else");
-        using (code.StartBlock())
-        {
-            code.AppendLine($"errors.Add(new ArgumentException($\"Invalid integer value ({{args[i]}}) for option '--{model.OptionName}' at position {{i}}.\"));");
-        }
-    }
-
-    private static void IntCollectionParserGenerator(CodeBuilder code, PropertyModel model)
-    {
-        code.AppendLine($"if (int.TryParse(args[i], out int v))");
-        using (code.StartBlock())
-        {
-            code.AppendLine($"opt_{model.Name}.Add(v);");
-        }
-        code.AppendLine("else");
-        using (code.StartBlock())
-        {
-            code.AppendLine($"errors.Add(new ArgumentException($\"Invalid integer value ({{args[i]}}) for option '--{model.OptionName}' at position {{i}}.\"));");
-        }
-    }
-
-    private static void BoolOptionParserGenerator(CodeBuilder code, PropertyModel model)
-    {
-        code.AppendLine($"if (bool.TryParse(args[i], out bool v))");
-        using (code.StartBlock())
-        {
-            code.AppendLine($"opt_{model.Name} = v;");
-        }
-        code.AppendLine("else");
-        using (code.StartBlock())
-        {
-            code.AppendLine($"errors.Add(new ArgumentException($\"Invalid boolean value ({{args[i]}}) for option '--{model.OptionName}' at position {{i}}.\"));");
-        }
-    }
+    #endregion
 }
