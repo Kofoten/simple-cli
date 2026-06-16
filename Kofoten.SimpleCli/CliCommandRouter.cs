@@ -3,25 +3,25 @@ using System.Collections.Generic;
 
 namespace Kofoten.SimpleCli;
 
-public class CliCommandRouter
+public sealed class CliCommandRouter
 {
-    private Dictionary<string, Func<ArraySegment<string>, ICliCommand>> factories = [];
+    private readonly Dictionary<string, Func<ArraySegment<string>, CliCommand>> factories = [];
 
-    public ICliCommand GetCommand(string[] args) => ResolveCommand(new ArraySegment<string>(args));
+    public CliCommand GetCommand(string[] args) => ResolveCommand(new ArraySegment<string>(args));
 
     public void Map(string verb, Action<CliCommandRouter> configure)
     {
         var router = new CliCommandRouter();
         configure(router);
-        factories.Add(verb, router.GetCommand);
+        factories.Add(verb, router.ResolveCommand);
     }
 
-    public void Map(string verb, Func<string[], ICliCommand> factory)
+    public void Map(string verb, Func<ArraySegment<string>, ICliParsable> factory)
     {
-        factories.Add(verb, factory);
+        factories.Add(verb, (args) => new CliCommand(factory(args)));
     }
 
-    private ICliCommand ResolveCommand(ArraySegment<string> args)
+    private CliCommand ResolveCommand(ArraySegment<string> args)
     {
         if (args.Count == 0)
         {

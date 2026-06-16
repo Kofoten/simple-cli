@@ -1,6 +1,6 @@
 ﻿namespace Kofoten.SimpleCli;
 
-public interface ICliCommand
+public interface ICliCommand : ICliParsable
 {
     int Execute();
 }

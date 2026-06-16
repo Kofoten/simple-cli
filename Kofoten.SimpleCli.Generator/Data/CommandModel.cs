@@ -6,5 +6,5 @@ internal record CommandModel(
     string Namespace,
     string ClassName,
     List<ConstructorParameterModel> ConstructorParameters,
-    List<PropertyModel> Properties
-);
+    List<PropertyModel> Properties,
+    bool HasDependencyInjection);
