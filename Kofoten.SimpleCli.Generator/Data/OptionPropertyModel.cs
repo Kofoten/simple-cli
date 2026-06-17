@@ -9,9 +9,10 @@ internal record OptionPropertyModel(
     SpecialType SpecialType,
     bool IsRequired,
     bool IsCollection,
+    string Description,
     string ParseMethodName,
     bool HasErrorMessageOut,
-    string? OptionName,
+    string OptionName,
     char? ShortName
 ) : PropertyModel(
     Name,
@@ -20,5 +21,6 @@ internal record OptionPropertyModel(
     SpecialType,
     IsRequired,
     IsCollection,
+    Description,
     ParseMethodName,
     HasErrorMessageOut);

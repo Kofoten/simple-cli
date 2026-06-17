@@ -8,6 +8,7 @@ internal record ArgumentPropertyModel(
     string ParseTypeName,
     SpecialType SpecialType,
     bool IsRequired,
+    string Description,
     string ParseMethodName,
     bool HasErrorMessageOut,
     int Position
@@ -18,5 +19,6 @@ internal record ArgumentPropertyModel(
     SpecialType,
     IsRequired,
     false,
+    Description,
     ParseMethodName,
     HasErrorMessageOut);

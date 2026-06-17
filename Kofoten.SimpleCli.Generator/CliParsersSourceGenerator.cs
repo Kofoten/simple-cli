@@ -148,12 +148,16 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 &&
                 argAttribute.ConstructorArguments[0].Value is int position)
             {
+                var descriptionArg = argAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Description");
+                var description = descriptionArg.Value.Value is string d ? d : string.Empty;
+
                 properties.Add(new ArgumentPropertyModel(
                     Name: member.Name,
                     TypeName: typeName,
                     ParseTypeName: parseTypeName,
                     SpecialType: parseTypeSymbol.SpecialType,
                     IsRequired: member.IsRequired,
+                    Description: description,
                     ParseMethodName: parserMethodName,
                     HasErrorMessageOut: hasErrorMessageOut,
                     Position: position));
@@ -167,12 +171,16 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 var shortArg = optAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Short");
                 char? shortName = shortArg.Value.Value is char c && c != '\0' ? c : null;
 
+                var descriptionArg = optAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Description");
+                var description = descriptionArg.Value.Value is string d ? d : string.Empty;
+
                 properties.Add(new OptionPropertyModel(
                     Name: member.Name,
                     TypeName: typeName,
                     ParseTypeName: parseTypeName,
                     SpecialType: parseTypeSymbol.SpecialType,
                     IsRequired: member.IsRequired,
+                    Description: description,
                     ParseMethodName: parserMethodName,
                     HasErrorMessageOut: hasErrorMessageOut,
                     OptionName: optName,
@@ -370,6 +378,69 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             code.AppendLine($"public static class {command.ClassName}Parser");
             using (code.StartBlock())
             {
+                var arguments = command.Properties.OfType<ArgumentPropertyModel>().OrderBy(p => p.Position).ToList();
+                var options = command.Properties.OfType<OptionPropertyModel>().OrderBy(p => p.OptionName).ToList();
+
+                var argumentNameLength = arguments.Max(a => a.Name.Length) + 4;
+                var optionNameLength = options.Max(o => o.OptionName.Length) + 4;
+
+                code.AppendLine("private const string HelpArgumentAndOptions = @\"");
+                if (arguments.Count != 0)
+                {
+                    code.AppendLine("Arguments:", applyIndent: false);
+                    foreach (var argument in arguments)
+                    {
+                        code.Append("  ");
+                        code.Append($"<{argument.Name}>".PadRight(argumentNameLength, ' '));
+                        code.AppendLine(argument.Description, applyIndent: false);
+                    }
+                    code.AppendLine(applyIndent: false);
+                }
+
+                code.AppendLine("Options:", applyIndent: false);
+                foreach (var option in options)
+                {
+                    if (option.ShortName is null)
+                    {
+                        code.Append("      ");
+                    }
+                    else
+                    {
+                        code.Append($"  -{option.ShortName}, ");
+                    }
+
+                    code.Append($"--{option.OptionName}".PadRight(optionNameLength, ' '));
+                    code.AppendLine(option.Description, applyIndent: false);
+                }
+
+                code.Append("  -h, ");
+                code.Append("--help".PadRight(optionNameLength, ' '));
+                code.AppendLine("Displays this message.\";", applyIndent: false);
+
+                code.AppendLine();
+                code.AppendLine("public static string GetHelpText(string commandPath)");
+                using (code.StartBlock())
+                {
+                    code.AppendLine($"return $@\"{command.Description}");
+                    code.AppendLine(applyIndent: false);
+                    code.AppendLine("Usage:", applyIndent: false);
+                    code.Append("  {commandPath}");
+
+                    foreach (var argument in arguments)
+                    {
+                        code.Append($" <{argument.Name}>");
+                    }
+
+                    if (options.Count != 0)
+                    {
+                        code.Append(" [options]");
+                    }
+
+                    code.AppendLine(applyIndent: false);
+                    code.AppendLine("{HelpArgumentAndOptions}\";", applyIndent: false);
+                }
+
+                code.AppendLine();
                 code.Append($"private static {command.ClassName} ParseCore(global::System.ArraySegment<string> args", applyIndent: true);
 
                 foreach (var ctorParam in command.ConstructorParameters)
@@ -391,7 +462,6 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     code.AppendLine("global::System.Collections.Generic.List<string> errors = new global::System.Collections.Generic.List<string>();");
                     code.AppendLine();
 
-                    var arguments = command.Properties.OfType<ArgumentPropertyModel>().OrderBy(p => p.Position).ToList();
                     foreach (var arg in arguments)
                     {
                         code.AppendLine($"{arg.TypeName} arg_{arg.Name} = default;");
@@ -420,7 +490,6 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         code.AppendLine();
                     }
 
-                    var options = command.Properties.OfType<OptionPropertyModel>().ToList();
                     foreach (var opt in options)
                     {
                         if (opt.IsCollection)
@@ -612,14 +681,14 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
                     code.AppendLine();
 
-                    code.Append($"router.Map(verb, (args) => ParseCore(args", applyIndent: true);
+                    code.Append($"router.Map(verb, \"{command.Description}\", (args) => ParseCore(args", applyIndent: true);
 
                     foreach (var ctorParam in command.ConstructorParameters)
                     {
                         code.Append($", {ctorParam.Name}");
                     }
 
-                    code.AppendLine($"));", applyIndent: false);
+                    code.AppendLine($"), GetHelpText);", applyIndent: false);
                 }
 
                 if (command.HasDependencyInjection)

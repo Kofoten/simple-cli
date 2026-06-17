@@ -1,16 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 
 namespace Kofoten.SimpleCli;
 
-public sealed class CliCommandRouter(CliCommandRouter? parent)
+public sealed class CliCommandRouter(string commandDescription) : ICliCommandFactory
 {
-    private readonly CliCommandRouter? parent = parent;
+    private readonly Dictionary<string, ICliCommandFactory> factories = [];
 
-    private readonly Dictionary<string, Func<ArraySegment<string>, CliCommand>> factories = [];
+    public string CommandDescription { get; private set; } = commandDescription;
 
     public CliCommandRouter()
-        : this(null)
+        : this(string.Empty)
     {
     }
 
@@ -20,7 +22,35 @@ public sealed class CliCommandRouter(CliCommandRouter? parent)
     /// </summary>
     /// <param name="args">The arguments to resolve the command from.</param>
     /// <returns>The resolved command.</returns>
-    public CliCommand GetCommand(string[] args) => ResolveCommand(new ArraySegment<string>(args));
+    public CliCommand GetCommand(string[] args)
+    {
+        ICliCommandFactory factory = this;
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "-h" || args[i] == "--help")
+            {
+                var path = string.Join(" ", args.Take(i));
+                Console.WriteLine(factory.GetUsage(path));
+                return new CliCommand(new CliDummyCommand());
+            }
+
+            if (factory is CliCommandFactory commandFactory)
+            {
+                return commandFactory.GetCommand(new ArraySegment<string>(args, i, args.Length - i));
+            }
+
+            if (factory is CliCommandRouter commandRouter
+                &&
+                commandRouter.factories.TryGetValue(args[i], out factory))
+            {
+                continue;
+            }
+
+            throw new ArgumentException($"Invalid verb: {args[i]}");
+        }
+
+        throw new ArgumentException($"Command '{string.Join(" ", args)}' requires at least one argument");
+    }
 
     /// <summary>
     /// Maps a verb to a command configuration. The provided configuration action allows you to define
@@ -29,10 +59,20 @@ public sealed class CliCommandRouter(CliCommandRouter? parent)
     /// <param name="verb">The verb to map.</param>
     /// <param name="configure">The configuration action to define subcommands.</param>
     public void Map(string verb, Action<CliCommandRouter> configure)
+        => Map(verb, string.Empty, configure);
+
+    /// <summary>
+    /// Maps a verb to a command configuration. The provided configuration action allows you to define
+    /// subcommands for the verb.
+    /// </summary>
+    /// <param name="verb">The verb to map.</param>
+    /// <param name="description">The description of the group.</param>
+    /// <param name="configure">The configuration action to define subcommands.</param>
+    public void Map(string verb, string description, Action<CliCommandRouter> configure)
     {
-        var router = new CliCommandRouter(this);
+        var router = new CliCommandRouter(description);
         configure(router);
-        factories.Add(verb, router.ResolveCommand);
+        factories.Add(verb, router);
     }
 
     /// <summary>
@@ -40,26 +80,34 @@ public sealed class CliCommandRouter(CliCommandRouter? parent)
     /// and returns an instance of <see cref="ICliParsable"/>.
     /// </summary>
     /// <param name="verb">The verb to map.</param>
+    /// <param name="description">The description of the command.</param>
     /// <param name="factory">The factory function to create the command.</param>
-    public void Map(string verb, Func<ArraySegment<string>, ICliParsable> factory)
+    public void Map(string verb, string description, Func<ArraySegment<string>, ICliParsable> factoryFunction, Func<string, string> usageFunction)
     {
-        factories.Add(verb, (args) => new CliCommand(factory(args)));
+        factories.Add(verb, new CliCommandFactory(description, factoryFunction, usageFunction));
     }
 
-    private CliCommand ResolveCommand(ArraySegment<string> args)
+    public string GetUsage(string commandPath)
     {
-        if (args.Count == 0)
+        var builder = new StringBuilder();
+        builder.AppendLine(CommandDescription);
+        builder.AppendLine();
+        builder.AppendLine("Usage:");
+        builder.AppendLine($"  {commandPath} subcommands... <args> [options]");
+        builder.AppendLine();
+        builder.AppendLine("Subcommands:");
+
+        var verbNameLength = factories.Max(x => x.Key.Length);
+        foreach (var factory in factories.OrderBy(x => x.Key))
         {
-            throw new ArgumentException($"Command '{{command}}' requires at least one argument");
+            var verb = factory.Key.PadRight(verbNameLength, ' ');
+            builder.AppendLine($"  {verb}  {factory.Value.CommandDescription}");
         }
 
-        var verb = args.Array[args.Offset];
-        if (factories.TryGetValue(verb, out var factory))
-        {
-            var subsegment = new ArraySegment<string>(args.Array, args.Offset + 1, args.Count - 1);
-            return factory(subsegment);
-        }
+        builder.AppendLine();
+        builder.AppendLine("Options:");
+        builder.AppendLine("  -h, --help  Displays this message.");
 
-        throw new ArgumentException($"Invalid verb: {verb}");
+        return builder.ToString();
     }
 }
