@@ -43,5 +43,13 @@ namespace Kofoten.SimpleCli.Generator.Diagnostics
             category: "Kofoten.SimpleCli.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor ReservedHelpOption = new(
+            id: "SCLI006",
+            title: "Reserved CLI option",
+            messageFormat: "Property '{0}' uses a reserved help option ('{1}'). '-h' and '--help' are reserved by the simple-cli router.",
+            category: "Kofoten.SimpleCli.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
     }
 }

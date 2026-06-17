@@ -171,6 +171,24 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 var shortArg = optAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Short");
                 char? shortName = shortArg.Value.Value is char c && c != '\0' ? c : null;
 
+                if (string.Equals(optName, "help", StringComparison.OrdinalIgnoreCase))
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        DiagnosticDescriptors.ReservedHelpOption,
+                        member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                        member.Name,
+                        "--help"));
+                }
+
+                if (shortName == 'h')
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        DiagnosticDescriptors.ReservedHelpOption,
+                        member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                        member.Name,
+                        "-h"));
+                }
+
                 var descriptionArg = optAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Description");
                 var description = descriptionArg.Value.Value is string d ? d : string.Empty;
 
