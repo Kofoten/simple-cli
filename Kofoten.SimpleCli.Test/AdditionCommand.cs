@@ -14,11 +14,17 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
     [CliOption("additional-numbers", Short = 'a', Description = "Additional numbers to add.")]
     public IEnumerable<int> AdditionalNumbers { get; init; } = [];
 
-    [CliOption("verbose", Short = 'v', Description = "Print the result of each addidtion.")]
+    [CliOption("verbose", Short = 'V', Description = "Print the result of each addidtion.")]
     public bool Verbose { get; init; } = false;
 
     [CliOption("table", Short = 't', Description = "Print each step as a table.")]
     public bool Table { get; init; } = false;
+
+    [CliOption("version", Short = 'v', Description = "Displays the version of the command")]
+    public bool Version { get; init; } = false;
+
+    [CliOption("cheese", Description = "Eats the specified cheese")]
+    public Cheese? Cheese { get; init; } = null;
 
     public int Execute()
     {

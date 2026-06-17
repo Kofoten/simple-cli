@@ -5,6 +5,7 @@ namespace Kofoten.SimpleCli.Generator.Data;
 internal record CommandModel(
     string Namespace,
     string ClassName,
+    string? Description,
     List<ConstructorParameterModel> ConstructorParameters,
     List<PropertyModel> Properties,
     bool HasDependencyInjection);

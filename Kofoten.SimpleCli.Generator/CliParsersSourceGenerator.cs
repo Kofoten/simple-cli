@@ -1,8 +1,12 @@
 ﻿using Kofoten.SimpleCli.Generator.Data;
+using Kofoten.SimpleCli.Generator.Diagnostics;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
+using System.Xml.Linq;
 
 namespace Kofoten.SimpleCli.Generator;
 
@@ -14,20 +18,32 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         var commandModels = context.SyntaxProvider
             .CreateSyntaxProvider(
                 predicate: static (s, _) => s is ClassDeclarationSyntax c && c.BaseList is not null,
-                transform: static (ctx, _) => GetCommandTarget(ctx))
-            .Where(static m => m is not null);
+                transform: static (ctx, _) => GetCommandTarget(ctx));
 
-        context.RegisterSourceOutput(commandModels, static (spc, source) => GenerateParser(spc, source!));
+        context.RegisterSourceOutput(commandModels, static (spc, result) =>
+        {
+            foreach (var diagnostic in result.Diagnostics)
+            {
+                spc.ReportDiagnostic(diagnostic);
+            }
+
+            if (result.Command is not null)
+            {
+                GenerateParser(spc, result.Command);
+            }
+        });
     }
 
     #region BuildCommandModel
 
-    private static CommandModel? GetCommandTarget(GeneratorSyntaxContext context)
+    private static CommandGenerationResult GetCommandTarget(GeneratorSyntaxContext context)
     {
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         var classDecl = (ClassDeclarationSyntax)context.Node;
+
         if (context.SemanticModel.GetDeclaredSymbol(classDecl) is not INamedTypeSymbol classSymbol)
         {
-            return null;
+            return new CommandGenerationResult(null, diagnostics.ToImmutable());
         }
 
         var compilation = context.SemanticModel.Compilation;
@@ -48,7 +64,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
         if (!inheritsCommand)
         {
-            return null;
+            return new CommandGenerationResult(null, diagnostics.ToImmutable());
         }
 
         var publicConstructors = classSymbol.Constructors
@@ -57,9 +73,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
         if (publicConstructors.Count != 1)
         {
-            // Enforce opinion: We only support exactly ONE public constructor.
-            // TODO: Emit Diagnostic descriptor here for better DX.
-            return null;
+            diagnostics.Add(Diagnostic.Create(
+                DiagnosticDescriptors.InvalidPublicConstructorCount,
+                classDecl.Identifier.GetLocation(),
+                classSymbol.Name));
+
+            return new CommandGenerationResult(null, diagnostics.ToImmutable());
         }
 
         var constructorParams = new List<ConstructorParameterModel>();
@@ -86,19 +105,41 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 SymbolEqualityComparer.Default.Equals(a.AttributeClass, optAttributeSymbol));
 
             string typeName = member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            string parseTypeName = typeName;
+            ITypeSymbol parseTypeSymbol = member.Type;
 
             bool isCollection = false;
             if (TryGetEnumerableElementType(member.Type, compilation, out var elementType))
             {
                 if (elementType is null)
                 {
-                    // TODO: Emit Diagnostic descriptor here for better DX.
-                    return null;
+                    diagnostics.Add(Diagnostic.Create(
+                        DiagnosticDescriptors.UnsupportedCollectionElementType,
+                        member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                        member.Name));
+
+                    return new CommandGenerationResult(null, diagnostics.ToImmutable());
                 }
 
-                parseTypeName = elementType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                parseTypeSymbol = elementType;
                 isCollection = true;
+            }
+
+            bool isString = parseTypeSymbol.SpecialType == SpecialType.System_String;
+            string parseTypeName = parseTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            string parserMethodName = string.Empty;
+            bool isValidParser = false;
+            bool hasErrorMessageOut = false;
+
+            if (!isString)
+            {
+                string targetMethodName = "TryParse";
+                (isValidParser, hasErrorMessageOut) = InspectParserSignature(parseTypeSymbol, targetMethodName);
+                parserMethodName = $"{parseTypeName}.{targetMethodName}";
+            }
+
+            if (!isValidParser)
+            {
+                // TODO: Emit Diagnostic Error for DX: "Type {parseTypeSymbol.Name} does not have a valid parser."
             }
 
             if (argAttribute != null
@@ -111,7 +152,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     Name: member.Name,
                     TypeName: typeName,
                     ParseTypeName: parseTypeName,
+                    SpecialType: parseTypeSymbol.SpecialType,
                     IsRequired: member.IsRequired,
+                    ParseMethodName: parserMethodName,
+                    HasErrorMessageOut: hasErrorMessageOut,
                     Position: position));
             }
             else if (optAttribute != null
@@ -127,19 +171,86 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     Name: member.Name,
                     TypeName: typeName,
                     ParseTypeName: parseTypeName,
+                    SpecialType: parseTypeSymbol.SpecialType,
                     IsRequired: member.IsRequired,
+                    ParseMethodName: parserMethodName,
+                    HasErrorMessageOut: hasErrorMessageOut,
                     OptionName: optName,
                     ShortName: shortName,
                     IsCollection: isCollection));
             }
         }
 
-        return new CommandModel(
+        var propertySymbolsByName = classSymbol.GetMembers()
+            .OfType<IPropertySymbol>()
+            .ToDictionary(p => p.Name, p => p);
+
+        Location GetLocation(string propertyName) =>
+            propertySymbolsByName.TryGetValue(propertyName, out var p)
+                ? (p.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation())
+                : classDecl.Identifier.GetLocation();
+
+        foreach (var g in properties.OfType<ArgumentPropertyModel>().GroupBy(a => a.Position).Where(g => g.Count() > 1))
+        {
+            foreach (var p in g)
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    DiagnosticDescriptors.DuplicateArgumentPosition,
+                    GetLocation(p.Name),
+                    p.Name,
+                    g.Key,
+                    classSymbol.Name));
+            }
+        }
+
+        foreach (var g in properties
+            .OfType<OptionPropertyModel>()
+            .Where(o => !string.IsNullOrWhiteSpace(o.OptionName))
+            .GroupBy(o => o.OptionName, System.StringComparer.Ordinal)
+            .Where(g => g.Count() > 1))
+        {
+            foreach (var p in g)
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    DiagnosticDescriptors.DuplicateOptionName,
+                    GetLocation(p.Name),
+                    p.Name,
+                    p.OptionName,
+                    classSymbol.Name));
+            }
+        }
+
+        foreach (var g in properties
+            .OfType<OptionPropertyModel>()
+            .Where(o => o.ShortName.HasValue)
+            .GroupBy(o => o.ShortName!.Value)
+            .Where(g => g.Count() > 1))
+        {
+            foreach (var p in g)
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    DiagnosticDescriptors.DuplicateOptionShortName,
+                    GetLocation(p.Name),
+                    p.Name,
+                    p.ShortName!.Value,
+                    classSymbol.Name));
+            }
+        }
+
+        if (diagnostics.Count > 0)
+        {
+            return new CommandGenerationResult(null, diagnostics.ToImmutable());
+        }
+
+        var command = new CommandModel(
             Namespace: classSymbol.ContainingNamespace.ToDisplayString(),
             ClassName: classSymbol.Name,
+            Description: GetCommandDescription(classSymbol),
             ConstructorParameters: constructorParams,
             Properties: properties,
             HasDependencyInjection: hasDependencyInjection);
+
+        return new CommandGenerationResult(command, diagnostics.ToImmutable());
     }
 
     private static bool TryGetEnumerableElementType(
@@ -177,6 +288,71 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         return false;
     }
 
+    private static (bool IsValid, bool HasErrorMessageOut) InspectParserSignature(ITypeSymbol targetType, string methodName)
+    {
+        var methods = targetType.GetMembers(methodName).OfType<IMethodSymbol>();
+        foreach (var method in methods)
+        {
+            if (!method.IsStatic || method.ReturnType.SpecialType != SpecialType.System_Boolean)
+            {
+                continue;
+            }
+
+            var parameters = method.Parameters;
+            if (parameters.Length == 2
+                &&
+                parameters[0].Type.SpecialType == SpecialType.System_String
+                &&
+                parameters[1].RefKind == RefKind.Out)
+            {
+                return (true, false);
+            }
+
+            if (parameters.Length == 3
+                &&
+                parameters[0].Type.SpecialType == SpecialType.System_String
+                &&
+                parameters[1].RefKind == RefKind.Out
+                &&
+                parameters[2].Type.SpecialType == SpecialType.System_String
+                &&
+                parameters[2].RefKind == RefKind.Out)
+            {
+                return (true, true);
+            }
+        }
+
+        return (false, false);
+    }
+
+    private static string? GetCommandDescription(INamedTypeSymbol classSymbol)
+    {
+        string? xmlDoc = classSymbol.GetDocumentationCommentXml();
+
+        if (string.IsNullOrWhiteSpace(xmlDoc))
+        {
+            return null;
+        }
+
+        try
+        {
+            XElement element = XElement.Parse(xmlDoc);
+            XElement? summaryNode = element.Element("summary");
+
+            if (summaryNode != null)
+            {
+                var lines = summaryNode.Value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+                return string.Join(" ", lines.Select(l => l.Trim()).Where(l => l.Length > 0));
+            }
+        }
+        catch
+        {
+            return null;
+        }
+
+        return null;
+    }
+
     #endregion
 
     #region ParserGenerator
@@ -186,8 +362,6 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         var code = new CodeBuilder();
         code.AppendLine("// <auto-generated/>");
         code.AppendLine();
-        // code.AppendLine("#nullable enable");
-        // code.AppendLine();
         code.AppendLine("using System;");
         code.AppendLine();
         code.AppendLine($"namespace {command.Namespace}");
@@ -207,6 +381,13 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
                 using (code.StartBlock())
                 {
+                    code.AppendLine("if (args.Array is null)");
+                    using (code.StartBlock())
+                    {
+                        code.AppendLine("throw new global::System.ArgumentException(\"ArraySegment must reference a non-null array.\", nameof(args));");
+                    }
+                    code.AppendLine();
+
                     code.AppendLine("global::System.Collections.Generic.List<string> errors = new global::System.Collections.Generic.List<string>();");
                     code.AppendLine();
 
@@ -217,24 +398,13 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         code.AppendLine($"if (args.Count > {arg.Position})");
                         using (code.StartBlock())
                         {
-                            switch (arg.TypeName)
+                            if (arg.SpecialType == SpecialType.System_String)
                             {
-                                case "int":
-                                case "Int32":
-                                case "short":
-                                case "long":
-                                case "Int64":
-                                case "byte":
-                                case "uint":
-                                case "ulong":
-                                case "ushort":
-                                    TryParseParserGenerator(code, arg);
-                                    break;
-                                case "string":
-                                default:
-                                    code.AppendLine($"arg_{arg.Name} = args.Array[args.Offset + {arg.Position}];");
-                                    break;
-
+                                code.AppendLine($"arg_{arg.Name} = args.Array[args.Offset + {arg.Position}];");
+                            }
+                            else
+                            {
+                                TryParseParserGenerator(code, arg);
                             }
                         }
 
@@ -321,27 +491,23 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                 code.AppendLine($"case {stateId}:");
                                 using (code.Indent())
                                 {
-                                    switch (opt.ParseTypeName)
+                                    if (opt.SpecialType == SpecialType.System_String)
                                     {
-                                        case "bool":
-                                        case "int":
-                                        case "Int32":
-                                            using (code.StartBlock())
-                                            {
-                                                TryParseParserGenerator(code, opt);
-                                            }
-                                            break;
-                                        case "string":
-                                        default:
-                                            if (opt.IsCollection)
-                                            {
-                                                code.AppendLine($"opt_{opt.Name}.Add(args.Array[args.Offset + i]);");
-                                            }
-                                            else
-                                            {
-                                                code.AppendLine($"opt_{opt.Name} = args.Array[args.Offset + i];");
-                                            }
-                                            break;
+                                        if (opt.IsCollection)
+                                        {
+                                            code.AppendLine($"opt_{opt.Name}.Add(args.Array[args.Offset + i]);");
+                                        }
+                                        else
+                                        {
+                                            code.AppendLine($"opt_{opt.Name} = args.Array[args.Offset + i];");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        using (code.StartBlock())
+                                        {
+                                            TryParseParserGenerator(code, opt);
+                                        }
                                     }
 
                                     if (!opt.IsCollection)
@@ -405,6 +571,13 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 code.AppendLine($")", applyIndent: false);
                 using (code.StartBlock())
                 {
+                    code.AppendLine("if (args is null)");
+                    using (code.StartBlock())
+                    {
+                        code.AppendLine("throw new global::System.ArgumentNullException(nameof(args));");
+                    }
+                    code.AppendLine();
+
                     code.Append($"return ParseCore(new global::System.ArraySegment<string>(args)", applyIndent: true);
 
                     foreach (var ctorParam in command.ConstructorParameters)
@@ -426,6 +599,19 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 code.AppendLine($")", applyIndent: false);
                 using (code.StartBlock())
                 {
+                    code.AppendLine("if (router is null)");
+                    using (code.StartBlock())
+                    {
+                        code.AppendLine("throw new global::System.ArgumentNullException(nameof(router));");
+                    }
+                    code.AppendLine();
+                    code.AppendLine("if (verb is null)");
+                    using (code.StartBlock())
+                    {
+                        code.AppendLine("throw new global::System.ArgumentNullException(nameof(verb));");
+                    }
+                    code.AppendLine();
+
                     code.Append($"router.Map(verb, (args) => ParseCore(args", applyIndent: true);
 
                     foreach (var ctorParam in command.ConstructorParameters)
@@ -440,15 +626,29 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 {
                     code.AppendLine();
                     code.AppendLine($"public static void Map{command.ClassName}(this global::Kofoten.SimpleCli.DependencyInjection.DependencyInjectionCliCommandRouter router, string verb)");
-
                     using (code.StartBlock())
                     {
+                        code.AppendLine("if (router is null)");
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine("throw new global::System.ArgumentNullException(nameof(router));");
+                        }
+                        code.AppendLine("if (verb is null)");
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine("throw new global::System.ArgumentNullException(nameof(verb));");
+                        }
+                        code.AppendLine();
+
                         code.Append($"router.Map(verb, (args, sp) => ParseCore(args", applyIndent: true);
 
                         foreach (var ctorParam in command.ConstructorParameters)
                         {
-                            code.Append(
-                                $", global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<{ctorParam.TypeName}>(sp)");
+                            code.AppendLine(",", applyIndent: false);
+                            using (code.Indent())
+                            {
+                                code.Append($"global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<{ctorParam.TypeName}>(sp)", applyIndent: true);
+                            }
                         }
 
                         code.AppendLine("));", applyIndent: false);
@@ -465,14 +665,31 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         switch (model)
         {
             case ArgumentPropertyModel argModel:
-                code.AppendLine($"if (!{argModel.ParseTypeName}.TryParse(args.Array[args.Offset + {argModel.Position}], out arg_{argModel.Name}))");
-                using (code.StartBlock())
+                code.Append($"if (!{argModel.ParseMethodName}(args.Array[args.Offset + {argModel.Position}], out arg_{argModel.Name}", applyIndent: true);
+                if (argModel.HasErrorMessageOut)
                 {
-                    code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ParseTypeName}\");");
+                    code.AppendLine(", out string customError))", applyIndent: false);
+                    using (code.StartBlock())
+                    {
+                        code.AppendLine($"errors.Add(\"Failed to parse argument {argModel.Name}: {{customError}}\");");
+                    }
+                }
+                else
+                {
+                    code.AppendLine("))", applyIndent: false);
+                    using (code.StartBlock())
+                    {
+                        code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ParseTypeName}\");");
+                    }
                 }
                 break;
             case OptionPropertyModel optModel:
-                code.AppendLine($"if ({optModel.ParseTypeName}.TryParse(args.Array[args.Offset + i], out {optModel.ParseTypeName} v))");
+                code.Append($"if ({optModel.ParseMethodName}(args.Array[args.Offset + i], out {optModel.ParseTypeName} v", applyIndent: true);
+                if (optModel.HasErrorMessageOut)
+                {
+                    code.Append(", out string customError");
+                }
+                code.AppendLine("))", applyIndent: false);
                 using (code.StartBlock())
                 {
                     if (model.IsCollection)
@@ -487,7 +704,14 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 code.AppendLine("else");
                 using (code.StartBlock())
                 {
-                    code.AppendLine($"errors.Add($\"Invalid {optModel.ParseTypeName} value ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                    if (optModel.HasErrorMessageOut)
+                    {
+                        code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
+                    }
+                    else
+                    {
+                        code.AppendLine($"errors.Add($\"Invalid {optModel.ParseTypeName} value ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                    }
                 }
                 break;
             default:
