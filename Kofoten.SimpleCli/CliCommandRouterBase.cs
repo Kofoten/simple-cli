@@ -54,20 +54,19 @@ public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string com
         factories.Add(verb, factory);
     }
 
-    public bool TryGetFactoryFunction(string[] args, [NotNullWhen(true)] out TFactoryFunction? factoryFunction, [NotNullWhen(false)] out string? error)
+    public FactoryFunctionResult<TFactoryFunction> GetFactoryFunction(string[] args)
     {
         ICliCommandFactory<TFactoryFunction> factory = this;
         for (var i = 0; i < args.Length; i++)
         {
             if (args[i] == "-h" || args[i] == "--help")
             {
-                var path = string.Join(" ", args.Take(i));
-                Console.WriteLine(factory.GetUsage(path));
-                return new CliCommand(new CliDummyCommand());
+                return new FactoryFunctionResult<TFactoryFunction>.Usage(factory.GetUsage(string.Join(" ", args.Take(i))));
             }
 
             if (factory.IsLeaf)
             {
+
                 error = null;
                 factoryFunction = factory.GetFactoryFunction(new ArraySegment<string>(args, i, args.Length - i));
                 return true;
@@ -80,14 +79,12 @@ public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string com
                 continue;
             }
 
-            error = $"Invalid verb: {args[i]}";
-            factoryFunction = default;
-            return false;
+            var path = string.Join(" ", args.Take(i));
+            return new FactoryFunctionResult<TFactoryFunction>.Failure([$"Invalid verb: {args[i]}"], factory.GetUsage(path));
         }
 
-        error = $"Command '{string.Join(" ", args)}' requires at least one argument";
-        factoryFunction = default;
-        return false;
+        var commandPath = string.Join(" ", args);
+        return new FactoryFunctionResult<TFactoryFunction>.Failure([$"Command '{commandPath}' requires at least one argument"], factory.GetUsage(commandPath));
     }
 
     public string GetUsage(string commandPath)
@@ -117,5 +114,46 @@ public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string com
     public TFactoryFunction GetFactoryFunction(ArraySegment<string> args)
     {
         throw new NotImplementedException();
+    }
+
+}
+
+internal record FactoryFunctionResult<TFactoryFunction>
+{
+    public string HelpText { get; private set; }
+
+    protected FactoryFunctionResult(string helpText)
+    {
+        HelpText = helpText;
+    }
+
+    internal record Success : FactoryFunctionResult<TFactoryFunction>
+    {
+        public TFactoryFunction FactoryFunction { get; private set; }
+
+        public Success(TFactoryFunction factoryFunction)
+            : base(string.Empty)
+        {
+            FactoryFunction = factoryFunction;
+        }
+    }
+
+    internal record Failure : FactoryFunctionResult<TFactoryFunction>
+    {
+        public IEnumerable<string> Errors { get; private set; }
+
+        public Failure(IEnumerable<string> errors, string helpText)
+            : base(helpText)
+        {
+            Errors = errors;
+        }
+    }
+
+    internal record Usage : FactoryFunctionResult<TFactoryFunction>
+    {
+        public Usage(string helpText)
+            : base(helpText)
+        {
+        }
     }
 }
