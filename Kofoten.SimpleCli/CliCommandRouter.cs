@@ -1,16 +1,10 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 
 namespace Kofoten.SimpleCli;
 
-public sealed class CliCommandRouter(string commandDescription) : ICliCommandFactory
+public sealed class CliCommandRouter(string commandDescription) : CliCommandRouterBase<CliCommandRouter, Func<ArraySegment<string>, ICliParsable>>(commandDescription)
 {
-    private readonly Dictionary<string, ICliCommandFactory> factories = [];
-
-    public string CommandDescription { get; private set; } = commandDescription;
-
     public CliCommandRouter()
         : this(string.Empty)
     {
@@ -24,6 +18,11 @@ public sealed class CliCommandRouter(string commandDescription) : ICliCommandFac
     /// <returns>The resolved command.</returns>
     public CliCommand GetCommand(string[] args)
     {
+        if (TryGetFactoryFunction(args, out var factoryFunction, out var error))
+        {
+            var command = factoryFunction(new ArraySegment<string>(args, 1, args.Length - 1));
+            return new CliCommand(command);
+        }
         ICliCommandFactory factory = this;
         for (var i = 0; i < args.Length; i++)
         {
@@ -52,62 +51,5 @@ public sealed class CliCommandRouter(string commandDescription) : ICliCommandFac
         throw new ArgumentException($"Command '{string.Join(" ", args)}' requires at least one argument");
     }
 
-    /// <summary>
-    /// Maps a verb to a command configuration. The provided configuration action allows you to define
-    /// subcommands for the verb.
-    /// </summary>
-    /// <param name="verb">The verb to map.</param>
-    /// <param name="configure">The configuration action to define subcommands.</param>
-    public void Map(string verb, Action<CliCommandRouter> configure)
-        => Map(verb, string.Empty, configure);
-
-    /// <summary>
-    /// Maps a verb to a command configuration. The provided configuration action allows you to define
-    /// subcommands for the verb.
-    /// </summary>
-    /// <param name="verb">The verb to map.</param>
-    /// <param name="description">The description of the group.</param>
-    /// <param name="configure">The configuration action to define subcommands.</param>
-    public void Map(string verb, string description, Action<CliCommandRouter> configure)
-    {
-        var router = new CliCommandRouter(description);
-        configure(router);
-        factories.Add(verb, router);
-    }
-
-    /// <summary>
-    /// Maps a verb to a command factory. The factory is a function that takes the remaining arguments
-    /// and returns an instance of <see cref="ICliParsable"/>.
-    /// </summary>
-    /// <param name="verb">The verb to map.</param>
-    /// <param name="description">The description of the command.</param>
-    /// <param name="factory">The factory function to create the command.</param>
-    public void Map(string verb, string description, Func<ArraySegment<string>, ICliParsable> factoryFunction, Func<string, string> usageFunction)
-    {
-        factories.Add(verb, new CliCommandFactory(description, factoryFunction, usageFunction));
-    }
-
-    public string GetUsage(string commandPath)
-    {
-        var builder = new StringBuilder();
-        builder.AppendLine(CommandDescription);
-        builder.AppendLine();
-        builder.AppendLine("Usage:");
-        builder.AppendLine($"  {commandPath} subcommands... <args> [options]");
-        builder.AppendLine();
-        builder.AppendLine("Subcommands:");
-
-        var verbNameLength = factories.Max(x => x.Key.Length);
-        foreach (var factory in factories.OrderBy(x => x.Key))
-        {
-            var verb = factory.Key.PadRight(verbNameLength, ' ');
-            builder.AppendLine($"  {verb}  {factory.Value.CommandDescription}");
-        }
-
-        builder.AppendLine();
-        builder.AppendLine("Options:");
-        builder.AppendLine("  -h, --help  Displays this message.");
-
-        return builder.ToString();
-    }
+    protected override CliCommandRouter CreateSubRouter(string description) => new(description);
 }

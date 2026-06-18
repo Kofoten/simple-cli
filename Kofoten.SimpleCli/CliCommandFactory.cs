@@ -17,10 +17,3 @@ internal class CliCommandFactory(string commandDescription, Func<ArraySegment<st
 
     public string GetUsage(string commandPath) => usageFunction.Invoke(commandPath);
 }
-
-public interface ICliCommandFactory
-{
-    string CommandDescription { get; }
-
-    string GetUsage(string commandPath);
-}
