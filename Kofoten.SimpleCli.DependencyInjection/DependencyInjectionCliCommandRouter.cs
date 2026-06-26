@@ -28,10 +28,10 @@ public sealed class DependencyInjectionCliCommandRouter(string commandDescriptio
                 return ResolveParseResult(parseResult, success.HelpText);
             case CliFactoryFunctionResult<Func<IServiceProvider, CliParseResult>>.Failure failure:
                 var exitCode = errorHandler.Invoke(failure.Errors, failure.HelpText);
-                return new CliCommand(new CliExitCommand(exitCode));
+                return Exit(exitCode);
             case CliFactoryFunctionResult<Func<IServiceProvider, CliParseResult>>.Usage usage:
                 Console.WriteLine(usage.HelpText);
-                return new CliCommand(new CliExitCommand(0));
+                return Exit(0);
             default:
                 throw new ArgumentOutOfRangeException();
         }

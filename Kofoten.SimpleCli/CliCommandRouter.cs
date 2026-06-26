@@ -26,10 +26,10 @@ public sealed class CliCommandRouter(string commandDescription, Func<IEnumerable
                 return ResolveParseResult(parseResult, success.HelpText);
             case CliFactoryFunctionResult<Func<CliParseResult>>.Failure failure:
                 var exitCode = errorHandler.Invoke(failure.Errors, failure.HelpText);
-                return new CliCommand(new CliExitCommand(exitCode));
+                return Exit(exitCode);
             case CliFactoryFunctionResult<Func<CliParseResult>>.Usage usage:
                 Console.WriteLine(usage.HelpText);
-                return new CliCommand(new CliExitCommand(0));
+                return Exit(0);
             default:
                 throw new ArgumentOutOfRangeException();
         }

@@ -123,9 +123,11 @@ public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string com
                 return new CliCommand(parseSuccess.Parsable);
             case CliParseResult.Failure parseFailure:
                 var exitCode = errorHandler.Invoke(parseFailure.Errors, helpText);
-                return new CliCommand(new CliExitCommand(exitCode));
+                return Exit(exitCode);
             default:
                 throw new ArgumentOutOfRangeException();
         }
     }
+
+    protected CliCommand Exit(int exitCode) => new(exitCode);
 }

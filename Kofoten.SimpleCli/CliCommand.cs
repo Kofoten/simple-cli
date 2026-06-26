@@ -4,9 +4,21 @@ using System.Threading.Tasks;
 
 namespace Kofoten.SimpleCli;
 
-public sealed class CliCommand(ICliParsable command)
+public sealed class CliCommand
 {
-    private readonly ICliParsable command = command ?? throw new ArgumentNullException(nameof(command));
+    private readonly int exitCode;
+    private readonly ICliParsable? command;
+
+    internal CliCommand(ICliParsable command)
+    {
+        this.command = command ?? throw new ArgumentNullException(nameof(command));
+    }
+
+    internal CliCommand(int exitCode)
+    {
+        command = null;
+        this.exitCode = exitCode;
+    }
 
     /// <summary>
     /// Executes the command synchronously. If the command is asynchronous, it will be executed synchronously
@@ -19,6 +31,7 @@ public sealed class CliCommand(ICliParsable command)
     {
         ICliCommand cliCommand => cliCommand.Execute(),
         IAsyncCliCommand asyncCliCommand => ConfigureCancellationAndExecuteAsyncCommand(asyncCliCommand).GetAwaiter().GetResult(),
+        null => exitCode,
         _ => throw new InvalidOperationException($"Unsupported command type: {command.GetType().FullName}."),
     };
 
@@ -32,6 +45,7 @@ public sealed class CliCommand(ICliParsable command)
     {
         ICliCommand cliCommand => Task.FromResult(cliCommand.Execute()),
         IAsyncCliCommand asyncCliCommand => ConfigureCancellationAndExecuteAsyncCommand(asyncCliCommand),
+        null => Task.FromResult(exitCode),
         _ => throw new InvalidOperationException($"Unsupported command type: {command.GetType().FullName}."),
     };
 
@@ -46,6 +60,7 @@ public sealed class CliCommand(ICliParsable command)
     {
         ICliCommand cliCommand => Task.FromResult(cliCommand.Execute()),
         IAsyncCliCommand asyncCliCommand => asyncCliCommand.ExecuteAsync(cancellationToken),
+        null => Task.FromResult(exitCode),
         _ => throw new InvalidOperationException($"Unsupported command type: {command.GetType().FullName}."),
     };
 
