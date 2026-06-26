@@ -1,4 +1,6 @@
-﻿namespace Kofoten.SimpleCli.Test;
+﻿using Kofoten.SimpleCli.Test.Data;
+
+namespace Kofoten.SimpleCli.Test;
 
 /// <summary>
 /// Adds numbers togheter and prints the result.
@@ -24,7 +26,13 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
     public bool Version { get; init; } = false;
 
     [CliOption("cheese", Description = "Eats the specified cheese")]
-    public Cheese? Cheese { get; init; } = null;
+    public required Cheese Cheese { get; init; } = new Cheese("Västerbotten", "Sweden");
+
+    [CliOption("limit", Short = 'l', Description = "Sets a limit")]
+    public int Limit { get; init; } = 5;
+
+    [CliOption("signature", Short = 's', Description = "A signature for the math")]
+    public string Signature { get; init; } = "Kangaxx";
 
     public int Execute()
     {

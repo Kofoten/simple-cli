@@ -2,9 +2,9 @@
 
 ## Required features for MVP
 
+- Default value documentation
 - Enum parsing support
 - Key value options
-- Default value documentation
 
 ## Nice to have
 

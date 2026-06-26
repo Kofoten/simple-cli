@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 
-namespace Kofoten.SimpleCli.Test;
+namespace Kofoten.SimpleCli.Test.Data;
 
 public record Cheese(string Name, string Origin)
 {

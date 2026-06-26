@@ -8,4 +8,5 @@ internal record CommandModel(
     string? Description,
     List<ConstructorParameterModel> ConstructorParameters,
     List<PropertyModel> Properties,
-    bool HasDependencyInjection);
+    bool HasDependencyInjection,
+    List<string> Usings);

@@ -12,6 +12,7 @@ internal record OptionPropertyModel(
     string Description,
     string ParseMethodName,
     bool HasErrorMessageOut,
+    string? DefaultValueString,
     string OptionName,
     char? ShortName
 ) : PropertyModel(
