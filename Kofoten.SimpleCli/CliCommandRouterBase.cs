@@ -5,16 +5,18 @@ using System.Text;
 
 namespace Kofoten.SimpleCli;
 
-public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string commandDescription) : ICliCommandFactory<TFactoryFunction>
+public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string commandDescription, Func<IEnumerable<string>, string, int> errorHandler) : ICliCommandFactory<TFactoryFunction>
     where TRouter : CliCommandRouterBase<TRouter, TFactoryFunction>, ICliCommandFactory<TFactoryFunction>
 {
     private readonly Dictionary<string, ICliCommandFactory<TFactoryFunction>> factories = [];
 
+    protected readonly Func<IEnumerable<string>, string, int> errorHandler = errorHandler;
+
     public bool IsLeaf => false;
     public string CommandDescription { get; private set; } = commandDescription;
 
-    public CliCommandRouterBase()
-        : this(string.Empty)
+    public CliCommandRouterBase(Func<IEnumerable<string>, string, int> errorHandler)
+        : this(string.Empty, errorHandler)
     {
     }
 
@@ -54,22 +56,19 @@ public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string com
         factories.Add(verb, factory);
     }
 
-    public FactoryFunctionResult<TFactoryFunction> GetFactoryFunction(string[] args)
+    public CliFactoryFunctionResult<TFactoryFunction> GetFactoryFunction(string[] args)
     {
         ICliCommandFactory<TFactoryFunction> factory = this;
         for (var i = 0; i < args.Length; i++)
         {
             if (args[i] == "-h" || args[i] == "--help")
             {
-                return new FactoryFunctionResult<TFactoryFunction>.Usage(factory.GetUsage(string.Join(" ", args.Take(i))));
+                return new CliFactoryFunctionResult<TFactoryFunction>.Usage(factory.GetUsage(string.Join(" ", args.Take(i))));
             }
 
             if (factory.IsLeaf)
             {
-
-                error = null;
-                factoryFunction = factory.GetFactoryFunction(new ArraySegment<string>(args, i, args.Length - i));
-                return true;
+                return new CliFactoryFunctionResult<TFactoryFunction>.Success(factory.GetFactoryFunction(new ArraySegment<string>(args, i, args.Length - i)));
             }
 
             if (factory is TRouter commandRouter
@@ -80,11 +79,11 @@ public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string com
             }
 
             var path = string.Join(" ", args.Take(i));
-            return new FactoryFunctionResult<TFactoryFunction>.Failure([$"Invalid verb: {args[i]}"], factory.GetUsage(path));
+            return new CliFactoryFunctionResult<TFactoryFunction>.Failure([$"Invalid verb: {args[i]}"], factory.GetUsage(path));
         }
 
         var commandPath = string.Join(" ", args);
-        return new FactoryFunctionResult<TFactoryFunction>.Failure([$"Command '{commandPath}' requires at least one argument"], factory.GetUsage(commandPath));
+        return new CliFactoryFunctionResult<TFactoryFunction>.Failure([$"Command '{commandPath}' requires at least one argument"], factory.GetUsage(commandPath));
     }
 
     public string GetUsage(string commandPath)
@@ -116,44 +115,17 @@ public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string com
         throw new NotImplementedException();
     }
 
-}
-
-internal record FactoryFunctionResult<TFactoryFunction>
-{
-    public string HelpText { get; private set; }
-
-    protected FactoryFunctionResult(string helpText)
+    protected CliCommand ResolveParseResult(CliParseResult parseResult, string helpText)
     {
-        HelpText = helpText;
-    }
-
-    internal record Success : FactoryFunctionResult<TFactoryFunction>
-    {
-        public TFactoryFunction FactoryFunction { get; private set; }
-
-        public Success(TFactoryFunction factoryFunction)
-            : base(string.Empty)
+        switch (parseResult)
         {
-            FactoryFunction = factoryFunction;
-        }
-    }
-
-    internal record Failure : FactoryFunctionResult<TFactoryFunction>
-    {
-        public IEnumerable<string> Errors { get; private set; }
-
-        public Failure(IEnumerable<string> errors, string helpText)
-            : base(helpText)
-        {
-            Errors = errors;
-        }
-    }
-
-    internal record Usage : FactoryFunctionResult<TFactoryFunction>
-    {
-        public Usage(string helpText)
-            : base(helpText)
-        {
+            case CliParseResult.Success parseSuccess:
+                return new CliCommand(parseSuccess.Parsable);
+            case CliParseResult.Failure parseFailure:
+                var exitCode = errorHandler.Invoke(parseFailure.Errors, helpText);
+                return new CliCommand(new CliExitCommand(exitCode));
+            default:
+                throw new ArgumentOutOfRangeException();
         }
     }
 }

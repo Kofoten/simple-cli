@@ -33,7 +33,7 @@ try
 
     Console.WriteLine($"Simulating multi command app args: {string.Join(" ", simulatedArgs)}\n");
 
-    var router = new CliCommandRouter();
+    var router = new CliCommandRouter(ErrorHandler);
     router.Map("math", sr =>
     {
         sr.MapAdditionCommand("add", new());
@@ -58,13 +58,13 @@ catch (AggregateException ex)
 try
 {
     // Let's test the happy path with the greedy collection and both boolean flags
-    string[] simulatedArgs = ["add", "10", "20", "-a", "5", "15", "--verbose", "--table", "--cheese", "Gouda|Netherlands"];
+    string[] simulatedArgs = ["add", "10", "20", "-a", "5", "15", "a", "--verbose", "--table", "--cheese", "Gouda|Netherlands"];
 
     Console.WriteLine($"Simulating multi command app args: {string.Join(" ", simulatedArgs)}\n");
 
     var services = new ServiceCollection();
     services.AddSingleton(new object());
-    services.AddCliCommands(simulatedArgs, router =>
+    services.AddCliCommands(simulatedArgs, ErrorHandler, router =>
     {
         router.MapAdditionCommand("add");
     });
@@ -84,4 +84,17 @@ catch (AggregateException ex)
         Console.WriteLine($"- {inner.Message}");
     }
     Console.ResetColor();
+}
+
+int ErrorHandler(IEnumerable<string> errors, string helpText)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine("Command failed with the following errors:");
+    foreach (var error in errors)
+    {
+        Console.WriteLine($"- {error}");
+    }
+    Console.ResetColor();
+    Console.WriteLine(helpText);
+    return 1;
 }

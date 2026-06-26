@@ -34,17 +34,17 @@ internal class CodeBuilder
         sb.Append(text);
     }
 
-    public IDisposable StartBlock()
+    public IDisposable StartBlock(bool addTrailingSemicolon = false)
     {
         AppendLine("{");
         indent++;
-        return new BlockScope(this);
+        return new BlockScope(this, addTrailingSemicolon);
     }
 
-    private void EndBlock()
+    private void EndBlock(bool addTrailingSemicolon = false)
     {
         indent--;
-        AppendLine("}");
+        AppendLine("}" + (addTrailingSemicolon ? ";" : ""));
     }
 
     /// <summary>
@@ -60,11 +60,12 @@ internal class CodeBuilder
 
     public override string ToString() => sb.ToString();
 
-    private readonly struct BlockScope(CodeBuilder builder) : IDisposable
+    private readonly struct BlockScope(CodeBuilder builder, bool addTrailingSemicolon) : IDisposable
     {
         private readonly CodeBuilder builder = builder;
+        private readonly bool addTrailingSemicolon = addTrailingSemicolon;
 
-        public void Dispose() => builder.EndBlock();
+        public void Dispose() => builder.EndBlock(addTrailingSemicolon);
     }
 
     private readonly struct IndentScope(CodeBuilder builder) : IDisposable

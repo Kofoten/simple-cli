@@ -428,7 +428,15 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
 
                     code.Append($"--{option.OptionName}".PadRight(optionNameLength, ' '));
-                    code.AppendLine(option.Description, applyIndent: false);
+                    code.Append(option.Description);
+                    if (option.IsRequired)
+                    {
+                        code.AppendLine(" (required)", applyIndent: false);
+                    }
+                    else
+                    {
+                        code.AppendLine(" (Default: TODO find default value", applyIndent: false);
+                    }
                 }
 
                 code.Append("  -h, ");
@@ -459,7 +467,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
 
                 code.AppendLine();
-                code.Append($"private static {command.ClassName} ParseCore(global::System.ArraySegment<string> args", applyIndent: true);
+                code.Append($"private static CliParseResult ParseCore(global::System.ArraySegment<string> args", applyIndent: true);
 
                 foreach (var ctorParam in command.ConstructorParameters)
                 {
@@ -619,7 +627,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     using (code.StartBlock())
                     {
                         var ctorArgs = string.Join(", ", command.ConstructorParameters.Select(p => p.Name));
-                        code.AppendLine($"return new {command.ClassName}({ctorArgs})");
+                        code.AppendLine($"var command = new {command.ClassName}({ctorArgs})");
                         code.AppendLine("{");
                         using (code.Indent())
                         {
@@ -634,17 +642,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             }
                         }
                         code.AppendLine("};");
+                        code.AppendLine();
+                        code.AppendLine("return new CliParseResult.Success(command);");
                     }
 
                     code.AppendLine();
-                    code.AppendLine("global::System.Text.StringBuilder messageBuilder = new global::System.Text.StringBuilder();");
-                    code.AppendLine("messageBuilder.AppendLine(\"Failed to parse arguments:\");");
-                    code.AppendLine("foreach (string error in errors)");
-                    using (code.StartBlock())
-                    {
-                        code.AppendLine("messageBuilder.AppendLine($\"\\t{error}\");");
-                    }
-                    code.AppendLine("throw new ArgumentException(messageBuilder.ToString());");
+                    code.AppendLine("return new CliParseResult.Failure(errors);");
                 }
 
                 code.AppendLine();
@@ -665,7 +668,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
                     code.AppendLine();
 
-                    code.Append($"return ParseCore(new global::System.ArraySegment<string>(args)", applyIndent: true);
+                    code.Append($"var result = ParseCore(new global::System.ArraySegment<string>(args)", applyIndent: true);
 
                     foreach (var ctorParam in command.ConstructorParameters)
                     {
@@ -673,6 +676,31 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
 
                     code.AppendLine($");", applyIndent: false);
+
+                    code.AppendLine("switch (result)");
+                    using (code.StartBlock())
+                    {
+                        code.AppendLine("case CliParseResult.Success success:");
+                        using (code.Indent())
+                        {
+                            code.AppendLine($"return ({command.ClassName})success.Parsable;");
+                        }
+                        code.AppendLine("case CliParseResult.Failure failure:");
+                        using (code.Indent())
+                        {
+                            code.AppendLine("global::System.Text.StringBuilder messageBuilder = new global::System.Text.StringBuilder();");
+                            code.AppendLine("messageBuilder.AppendLine(\"Failed to parse arguments:\");");
+                            code.AppendLine("foreach (string error in failure.Errors)");
+                            using (code.StartBlock())
+                            {
+                                code.AppendLine("messageBuilder.AppendLine($\"\\t{error}\");");
+                            }
+                            code.AppendLine("throw new ArgumentException(messageBuilder.ToString());");
+                        }
+                        code.AppendLine("break;");
+                    }
+
+                    code.AppendLine("throw new global::System.InvalidOperationException(\"Unexpected parse result.\");");
                 }
 
                 code.AppendLine();
@@ -699,14 +727,67 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
                     code.AppendLine();
 
-                    code.Append($"router.Map(verb, \"{command.Description}\", (args) => ParseCore(args", applyIndent: true);
+                    code.Append($"router.Map(verb, new {command.ClassName}Factory(", applyIndent: true);
+                    if (command.ConstructorParameters.Count > 0)
+                    {
+                        code.Append($"{command.ConstructorParameters[0].Name}");
+                        for (int i = 1; i < command.ConstructorParameters.Count; i++)
+                        {
+                            code.Append($", {command.ConstructorParameters[i].Name}");
+                        }
+                    }
+                    code.AppendLine("));", applyIndent: false);
+                }
 
+                code.AppendLine();
+                code.AppendLine($"public class {command.ClassName}Factory : global::Kofoten.SimpleCli.ICliCommandFactory<Func<CliParseResult>>");
+                using (code.StartBlock())
+                {
                     foreach (var ctorParam in command.ConstructorParameters)
                     {
-                        code.Append($", {ctorParam.Name}");
+                        code.AppendLine($"private {ctorParam.TypeName} {ctorParam.Name};");
                     }
 
-                    code.AppendLine($"), GetHelpText);", applyIndent: false);
+                    code.AppendLine();
+                    code.AppendLine("public bool IsLeaf => true;");
+                    code.AppendLine($"public string CommandDescription => \"{command.Description}\";");
+                    code.AppendLine();
+
+                    code.Append($"public {command.ClassName}Factory(", applyIndent: true);
+                    if (command.ConstructorParameters.Count > 0)
+                    {
+                        code.Append($"{command.ConstructorParameters[0].TypeName} {command.ConstructorParameters[0].Name}");
+
+                        for (int i = 1; i < command.ConstructorParameters.Count; i++)
+                        {
+                            code.Append($", {command.ConstructorParameters[i].TypeName} {command.ConstructorParameters[i].Name}");
+                        }
+                    }
+
+                    code.AppendLine($")", applyIndent: false);
+                    using (code.StartBlock())
+                    {
+                        foreach (var ctorParam in command.ConstructorParameters)
+                        {
+                            code.AppendLine($"this.{ctorParam.Name} = {ctorParam.Name};");
+                        }
+                    }
+
+                    code.AppendLine();
+                    code.AppendLine($"public Func<CliParseResult> GetFactoryFunction(ArraySegment<string> args)");
+                    using (code.StartBlock())
+                    {
+                        code.Append($"return () => {command.ClassName}Parser.ParseCore(args", applyIndent: true);
+
+                        foreach (var ctorParam in command.ConstructorParameters)
+                        {
+                            code.Append($", {ctorParam.Name}");
+                        }
+
+                        code.AppendLine($");", applyIndent: false);
+                    }
+                    code.AppendLine();
+                    code.AppendLine($"public string GetUsage(string commandPath) => {command.ClassName}Parser.GetHelpText(commandPath);");
                 }
 
                 if (command.HasDependencyInjection)
@@ -726,19 +807,45 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             code.AppendLine("throw new global::System.ArgumentNullException(nameof(verb));");
                         }
                         code.AppendLine();
+                        code.AppendLine($"router.Map(verb, new DependencyInjection{command.ClassName}Factory());");
+                    }
 
-                        code.Append($"router.Map(verb, (args, sp) => ParseCore(args", applyIndent: true);
+                    code.AppendLine();
+                    code.AppendLine($"public class DependencyInjection{command.ClassName}Factory : global::Kofoten.SimpleCli.ICliCommandFactory<Func<IServiceProvider, CliParseResult>>");
+                    using (code.StartBlock())
+                    {
+                        code.AppendLine("public bool IsLeaf => true;");
+                        code.AppendLine($"public string CommandDescription => \"{command.Description}\";");
+                        code.AppendLine();
 
-                        foreach (var ctorParam in command.ConstructorParameters)
+                        code.AppendLine($"public DependencyInjection{command.ClassName}Factory()");
+                        using (code.StartBlock())
                         {
-                            code.AppendLine(",", applyIndent: false);
-                            using (code.Indent())
-                            {
-                                code.Append($"global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<{ctorParam.TypeName}>(sp)", applyIndent: true);
-                            }
                         }
 
-                        code.AppendLine("));", applyIndent: false);
+                        code.AppendLine();
+                        code.AppendLine($"public Func<IServiceProvider, CliParseResult> GetFactoryFunction(ArraySegment<string> args)");
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine("return (sp) =>");
+                            using (code.StartBlock(addTrailingSemicolon: true))
+                            {
+                                foreach (var ctorParam in command.ConstructorParameters)
+                                {
+                                    code.AppendLine($"var {ctorParam.Name} = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<{ctorParam.TypeName}>(sp);");
+                                }
+
+                                code.AppendLine();
+                                code.Append($"return {command.ClassName}Parser.ParseCore(args", applyIndent: true);
+                                foreach (var ctorParam in command.ConstructorParameters)
+                                {
+                                    code.Append($", {ctorParam.Name}");
+                                }
+                                code.AppendLine($");", applyIndent: false);
+                            }
+                        }
+                        code.AppendLine();
+                        code.AppendLine($"public string GetUsage(string commandPath) => {command.ClassName}Parser.GetHelpText(commandPath);");
                     }
                 }
             }

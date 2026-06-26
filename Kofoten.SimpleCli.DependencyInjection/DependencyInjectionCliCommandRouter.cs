@@ -3,9 +3,13 @@ using System.Collections.Generic;
 
 namespace Kofoten.SimpleCli.DependencyInjection;
 
-public class DependencyInjectionCliCommandRouter
+public sealed class DependencyInjectionCliCommandRouter(string commandDescription, Func<IEnumerable<string>, string, int> errorHandler)
+    : CliCommandRouterBase<DependencyInjectionCliCommandRouter, Func<IServiceProvider, CliParseResult>>(commandDescription, errorHandler)
 {
-    private readonly Dictionary<string, Func<ArraySegment<string>, IServiceProvider, CliCommand>> factories = [];
+    public DependencyInjectionCliCommandRouter(Func<IEnumerable<string>, string, int> errorHandler)
+        : this(string.Empty, errorHandler)
+    {
+    }
 
     /// <summary>
     /// Resolves a command based on the provided arguments. The first argument is treated as the
@@ -14,46 +18,24 @@ public class DependencyInjectionCliCommandRouter
     /// <param name="args">The arguments to resolve the command from.</param>
     /// <param name="serviceProvider">The service provider to resolve dependencies from.</param>
     /// <returns>The resolved command.</returns>
-    public CliCommand GetCommand(string[] args, IServiceProvider serviceProvider) => ResolveCommand(new ArraySegment<string>(args), serviceProvider);
-
-    /// <summary>
-    /// Maps a verb to a command configuration. The provided configuration action allows you to define
-    /// subcommands for the verb.
-    /// </summary>
-    /// <param name="verb">The verb to map.</param>
-    /// <param name="configure">The configuration action to define subcommands.</param>
-    public void Map(string verb, Action<DependencyInjectionCliCommandRouter> configure)
+    public CliCommand GetCommand(string[] args, IServiceProvider serviceProvider)
     {
-        var router = new DependencyInjectionCliCommandRouter();
-        configure(router);
-        factories.Add(verb, router.ResolveCommand);
-    }
-
-    /// <summary>
-    /// Maps a verb to a command factory. The factory is a function that takes the remaining arguments
-    /// and returns an instance of <see cref="ICliParsable"/>.
-    /// </summary>
-    /// <param name="verb">The verb to map.</param>
-    /// <param name="factory">The factory function to create the command.</param>
-    public void Map(string verb, Func<ArraySegment<string>, IServiceProvider, ICliParsable> factory)
-    {
-        factories.Add(verb, (args, sp) => new CliCommand(factory(args, sp)));
-    }
-
-    private CliCommand ResolveCommand(ArraySegment<string> args, IServiceProvider serviceProvider)
-    {
-        if (args.Count == 0)
+        var factoryResult = GetFactoryFunction(args);
+        switch (factoryResult)
         {
-            throw new ArgumentException($"Command '{{command}}' requires at least one argument");
+            case CliFactoryFunctionResult<Func<IServiceProvider, CliParseResult>>.Success success:
+                var parseResult = success.FactoryFunction.Invoke(serviceProvider);
+                return ResolveParseResult(parseResult, success.HelpText);
+            case CliFactoryFunctionResult<Func<IServiceProvider, CliParseResult>>.Failure failure:
+                var exitCode = errorHandler.Invoke(failure.Errors, failure.HelpText);
+                return new CliCommand(new CliExitCommand(exitCode));
+            case CliFactoryFunctionResult<Func<IServiceProvider, CliParseResult>>.Usage usage:
+                Console.WriteLine(usage.HelpText);
+                return new CliCommand(new CliExitCommand(0));
+            default:
+                throw new ArgumentOutOfRangeException();
         }
-
-        var verb = args.Array[args.Offset];
-        if (factories.TryGetValue(verb, out var factory))
-        {
-            var subsegment = new ArraySegment<string>(args.Array, args.Offset + 1, args.Count - 1);
-            return factory(subsegment, serviceProvider);
-        }
-
-        throw new ArgumentException($"Invalid verb: {verb}");
     }
+
+    protected override DependencyInjectionCliCommandRouter CreateSubRouter(string description) => new(description, errorHandler);
 }

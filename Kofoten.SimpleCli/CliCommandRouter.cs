@@ -1,12 +1,12 @@
 ﻿using System;
-using System.Linq;
+using System.Collections.Generic;
 
 namespace Kofoten.SimpleCli;
 
-public sealed class CliCommandRouter(string commandDescription) : CliCommandRouterBase<CliCommandRouter, Func<ArraySegment<string>, ICliParsable>>(commandDescription)
+public sealed class CliCommandRouter(string commandDescription, Func<IEnumerable<string>, string, int> errorHandler) : CliCommandRouterBase<CliCommandRouter, Func<CliParseResult>>(commandDescription, errorHandler)
 {
-    public CliCommandRouter()
-        : this(string.Empty)
+    public CliCommandRouter(Func<IEnumerable<string>, string, int> errorHandler)
+        : this(string.Empty, errorHandler)
     {
     }
 
@@ -18,38 +18,22 @@ public sealed class CliCommandRouter(string commandDescription) : CliCommandRout
     /// <returns>The resolved command.</returns>
     public CliCommand GetCommand(string[] args)
     {
-        if (TryGetFactoryFunction(args, out var factoryFunction, out var error))
+        var factoryResult = GetFactoryFunction(args);
+        switch (factoryResult)
         {
-            var command = factoryFunction(new ArraySegment<string>(args, 1, args.Length - 1));
-            return new CliCommand(command);
+            case CliFactoryFunctionResult<Func<CliParseResult>>.Success success:
+                var parseResult = success.FactoryFunction.Invoke();
+                return ResolveParseResult(parseResult, success.HelpText);
+            case CliFactoryFunctionResult<Func<CliParseResult>>.Failure failure:
+                var exitCode = errorHandler.Invoke(failure.Errors, failure.HelpText);
+                return new CliCommand(new CliExitCommand(exitCode));
+            case CliFactoryFunctionResult<Func<CliParseResult>>.Usage usage:
+                Console.WriteLine(usage.HelpText);
+                return new CliCommand(new CliExitCommand(0));
+            default:
+                throw new ArgumentOutOfRangeException();
         }
-        ICliCommandFactory factory = this;
-        for (var i = 0; i < args.Length; i++)
-        {
-            if (args[i] == "-h" || args[i] == "--help")
-            {
-                var path = string.Join(" ", args.Take(i));
-                Console.WriteLine(factory.GetUsage(path));
-                return new CliCommand(new CliDummyCommand());
-            }
-
-            if (factory is CliCommandFactory commandFactory)
-            {
-                return commandFactory.GetCommand(new ArraySegment<string>(args, i, args.Length - i));
-            }
-
-            if (factory is CliCommandRouter commandRouter
-                &&
-                commandRouter.factories.TryGetValue(args[i], out factory))
-            {
-                continue;
-            }
-
-            throw new ArgumentException($"Invalid verb: {args[i]}");
-        }
-
-        throw new ArgumentException($"Command '{string.Join(" ", args)}' requires at least one argument");
     }
 
-    protected override CliCommandRouter CreateSubRouter(string description) => new(description);
+    protected override CliCommandRouter CreateSubRouter(string description) => new(description, errorHandler);
 }
