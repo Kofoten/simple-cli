@@ -1,6 +1,7 @@
 ﻿using Kofoten.SimpleCli;
 using Kofoten.SimpleCli.NetstandardTest;
 using System;
+using System.Collections.Generic;
 
 public class Program
 {
@@ -38,7 +39,7 @@ public class Program
 
             Console.WriteLine($"Simulating multi command app args: {string.Join(" ", simulatedArgs)}\n");
 
-            var router = new CliCommandRouter();
+            var router = new CliCommandRouter(ErrorHandler);
             router.Map("math", sr =>
             {
                 sr.MapAdditionCommand("add", imaginaryService);
@@ -61,5 +62,18 @@ public class Program
         }
 
         return 0;
+    }
+
+    static int ErrorHandler(IEnumerable<string> errors, string helpText)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("Command failed with the following errors:");
+        foreach (var error in errors)
+        {
+            Console.WriteLine($"- {error}");
+        }
+        Console.ResetColor();
+        Console.WriteLine(helpText);
+        return 1;
     }
 }

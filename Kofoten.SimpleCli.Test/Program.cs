@@ -86,7 +86,7 @@ catch (AggregateException ex)
     Console.ResetColor();
 }
 
-int ErrorHandler(IEnumerable<string> errors, string helpText)
+static int ErrorHandler(IEnumerable<string> errors, string helpText)
 {
     Console.ForegroundColor = ConsoleColor.Red;
     Console.WriteLine("Command failed with the following errors:");
