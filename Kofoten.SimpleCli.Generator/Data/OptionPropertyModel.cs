@@ -9,6 +9,8 @@ internal record OptionPropertyModel(
     SpecialType SpecialType,
     bool IsRequired,
     bool IsCollection,
+    bool IsDictionary,
+    bool IsEnum,
     string Description,
     string ParseMethodName,
     bool HasErrorMessageOut,
@@ -22,6 +24,8 @@ internal record OptionPropertyModel(
     SpecialType,
     IsRequired,
     IsCollection,
+    IsDictionary,
+    IsEnum,
     Description,
     ParseMethodName,
     HasErrorMessageOut);

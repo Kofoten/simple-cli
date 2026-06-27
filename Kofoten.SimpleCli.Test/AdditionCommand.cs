@@ -34,6 +34,9 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
     [CliOption("signature", Short = 's', Description = "A signature for the math")]
     public string Signature { get; init; } = "Kangaxx";
 
+    [CliOption("weather", Short = 'w', Description = "Whats the weather")]
+    public Weather Weather { get; init; } = Weather.Sunny;
+
     public int Execute()
     {
         int[] allNumbers = [FirstNumber, SecondNumber, .. AdditionalNumbers];

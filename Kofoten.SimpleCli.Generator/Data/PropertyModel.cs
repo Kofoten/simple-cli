@@ -9,6 +9,8 @@ internal abstract record PropertyModel(
     SpecialType SpecialType,
     bool IsRequired,
     bool IsCollection,
+    bool IsDictionary,
+    bool IsEnum,
     string Description,
     string ParseMethodName,
     bool HasErrorMessageOut);

@@ -111,8 +111,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             string typeName = member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             ITypeSymbol parseTypeSymbol = member.Type;
             bool isString = parseTypeSymbol.SpecialType == SpecialType.System_String;
-
+            bool isEnum = parseTypeSymbol.TypeKind == TypeKind.Enum;
             bool isCollection = false;
+            bool isDictionary = false;
+
             if (!isString && TryGetEnumerableElementType(member.Type, compilation, out var elementType))
             {
                 if (elementType is null)
@@ -134,7 +136,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             bool isValidParser = false;
             bool hasErrorMessageOut = false;
 
-            if (!isString)
+            if (isEnum)
+            {
+                isValidParser = true;
+            }
+            else if (!isString)
             {
                 string targetMethodName = "TryParse";
                 (isValidParser, hasErrorMessageOut) = InspectParserSignature(parseTypeSymbol, targetMethodName);
@@ -177,7 +183,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     Description: description,
                     ParseMethodName: parserMethodName,
                     HasErrorMessageOut: hasErrorMessageOut,
-                    Position: position));
+                    Position: position,
+                    IsEnum: isEnum));
             }
             else if (optAttribute != null
                 &&
@@ -221,7 +228,9 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     DefaultValueString: defaultValueString,
                     OptionName: optName,
                     ShortName: shortName,
-                    IsCollection: isCollection));
+                    IsCollection: isCollection,
+                    IsDictionary: isDictionary,
+                    IsEnum: isEnum));
             }
         }
 
@@ -894,31 +903,50 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         switch (model)
         {
             case ArgumentPropertyModel argModel:
-                code.Append($"if (!{argModel.ParseMethodName}(args.Array[args.Offset + {argModel.Position}], out arg_{argModel.Name}", applyIndent: true);
-                if (argModel.HasErrorMessageOut)
+                if (argModel.IsEnum)
                 {
-                    code.AppendLine(", out global::System.String customError))", applyIndent: false);
-                    using (code.StartBlock())
-                    {
-                        code.AppendLine($"errors.Add(\"Failed to parse argument {argModel.Name}: {{customError}}\");");
-                    }
-                }
-                else
-                {
-                    code.AppendLine("))", applyIndent: false);
+                    code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ParseTypeName}>(args.Array[args.Offset + {argModel.Position}], true, out arg_{argModel.Name}))", applyIndent: true);
                     using (code.StartBlock())
                     {
                         code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ParseTypeName}\");");
                     }
                 }
+                else
+                {
+                    code.Append($"if (!{argModel.ParseMethodName}(args.Array[args.Offset + {argModel.Position}], out arg_{argModel.Name}", applyIndent: true);
+                    if (argModel.HasErrorMessageOut)
+                    {
+                        code.AppendLine(", out global::System.String customError))", applyIndent: false);
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine($"errors.Add(\"Failed to parse argument {argModel.Name}: {{customError}}\");");
+                        }
+                    }
+                    else
+                    {
+                        code.AppendLine("))", applyIndent: false);
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ParseTypeName}\");");
+                        }
+                    }
+                }
                 break;
             case OptionPropertyModel optModel:
-                code.Append($"if ({optModel.ParseMethodName}(args.Array[args.Offset + i], out {optModel.ParseTypeName} v", applyIndent: true);
-                if (optModel.HasErrorMessageOut)
+                if (optModel.IsEnum)
                 {
-                    code.Append(", out global::System.String customError");
+                    code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ParseTypeName}>(args.Array[args.Offset + i], true, out {optModel.ParseTypeName} v))");
                 }
-                code.AppendLine("))", applyIndent: false);
+                else
+                {
+                    code.Append($"if ({optModel.ParseMethodName}(args.Array[args.Offset + i], out {optModel.ParseTypeName} v", applyIndent: true);
+                    if (optModel.HasErrorMessageOut)
+                    {
+                        code.Append(", out global::System.String customError");
+                    }
+                    code.AppendLine("))", applyIndent: false);
+                }
+
                 using (code.StartBlock())
                 {
                     if (model.IsCollection)

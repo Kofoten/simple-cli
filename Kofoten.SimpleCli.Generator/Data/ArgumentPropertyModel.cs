@@ -8,6 +8,7 @@ internal record ArgumentPropertyModel(
     string ParseTypeName,
     SpecialType SpecialType,
     bool IsRequired,
+    bool IsEnum,
     string Description,
     string ParseMethodName,
     bool HasErrorMessageOut,
@@ -19,6 +20,8 @@ internal record ArgumentPropertyModel(
     SpecialType,
     IsRequired,
     false,
+    false,
+    IsEnum,
     Description,
     ParseMethodName,
     HasErrorMessageOut);
