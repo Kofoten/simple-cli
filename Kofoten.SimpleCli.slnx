@@ -3,7 +3,6 @@
     <File Path=".gitignore" />
     <File Path="LICENSE" />
     <File Path="README.md" />
-    <File Path="ROADMAP.md" />
   </Folder>
   <Folder Name="/Solution Items/.github/" />
   <Folder Name="/Solution Items/.github/workflows/">

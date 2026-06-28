@@ -37,14 +37,15 @@ There are some limitations in what kind of cli that can be designed. Some limita
 - There is no detection for unknown options. Example: The only existing option is `--hello`, if the user writes `--x` nothing will happen and if the user writes `--hello --x` then `--x` will be passed as the value of `--hello`.
 - No support for `-` to indicate reading from stdin.
 - No support for `--` to indicate the end of options.
+- No middleware or interception pipeline.
 
 ### Will change (probably)
 
+- Poor key/value support (currently only supports ``System.Collections.Generic.Dictionary`2``)
 - No validation pipeline.
 - No custom parsers.
 - No hidden or global options.
 - No shell auto completions.
-- No middleware or interception pipeline.
 
 ## Supported property types
 

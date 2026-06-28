@@ -35,34 +35,34 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
             var supportedEnumerableOfTInterfaces = new List<INamedTypeSymbol>(5);
 
-            var enumerableOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IEnumerable`1");
-            if (enumerableOfT != null)
+            var iEnumerableOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IEnumerable`1");
+            if (iEnumerableOfT != null)
             {
-                supportedEnumerableOfTInterfaces.Add(enumerableOfT);
+                supportedEnumerableOfTInterfaces.Add(iEnumerableOfT);
             }
 
-            var collectionOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.ICollection`1");
-            if (collectionOfT != null)
+            var iCollectionOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.ICollection`1");
+            if (iCollectionOfT != null)
             {
-                supportedEnumerableOfTInterfaces.Add(collectionOfT);
+                supportedEnumerableOfTInterfaces.Add(iCollectionOfT);
             }
 
-            var readOnlyCollectionOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyCollection`1");
-            if (readOnlyCollectionOfT != null)
+            var iReadOnlyCollectionOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyCollection`1");
+            if (iReadOnlyCollectionOfT != null)
             {
-                supportedEnumerableOfTInterfaces.Add(readOnlyCollectionOfT);
+                supportedEnumerableOfTInterfaces.Add(iReadOnlyCollectionOfT);
             }
 
-            var listOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IList`1");
-            if (listOfT != null)
+            var iListOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IList`1");
+            if (iListOfT != null)
             {
-                supportedEnumerableOfTInterfaces.Add(listOfT);
+                supportedEnumerableOfTInterfaces.Add(iListOfT);
             }
 
-            var readOnlyListOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyList`1");
-            if (readOnlyListOfT != null)
+            var iReadOnlyListOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyList`1");
+            if (iReadOnlyListOfT != null)
             {
-                supportedEnumerableOfTInterfaces.Add(readOnlyListOfT);
+                supportedEnumerableOfTInterfaces.Add(iReadOnlyListOfT);
             }
 
             return new SimpleCliCompilationContext(
@@ -70,8 +70,13 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 CliArgumentAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliArgumentAttribute"),
                 CliOptionAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliOptionAttribute"),
                 FlagsAttributeSymbol: compilation.GetTypeByMetadataName("System.FlagsAttribute"),
-                EnumerableOfTSymbol: enumerableOfT,
+                EnumerableOfTSymbol: iEnumerableOfT,
                 KeyValuePairOfT2Symbol: compilation.GetTypeByMetadataName("System.Collections.Generic.KeyValuePair`2"),
+                ListOfTSymbol: compilation.GetTypeByMetadataName("System.Collections.Generic.List`1"),
+                ImmutableArrayOfTSymbol: compilation.GetTypeByMetadataName("System.Collections.Immutable.ImmutableArray`1"),
+                ImmutableListOfTSymbol: compilation.GetTypeByMetadataName("System.Collections.Immutable.ImmutableList`1"),
+                ImmutableHashSetOfTSymbol: compilation.GetTypeByMetadataName("System.Collections.Immutable.ImmutableHashSet`1"),
+                FrozenSetOfTSymbol: compilation.GetTypeByMetadataName("System.Collections.Frozen.FrozenSet`1"),
                 SupportedEnumerableOfTInterfaceSymbols: supportedEnumerableOfTInterfaces,
                 HasDependencyInjection: hasDependencyInjection);
         });
@@ -109,6 +114,13 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
     private static CommandGenerationResult GetCommandTarget(ClassDeclarationSyntax classDecl, SemanticModel semanticModel, SimpleCliCompilationContext simpleCliContext)
     {
+        //#if DEBUG
+        //        if (!global::System.Diagnostics.Debugger.IsAttached)
+        //        {
+        //            global::System.Diagnostics.Debugger.Launch();
+        //        }
+        //#endif
+
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         var compilationUnit = (CompilationUnitSyntax)classDecl.SyntaxTree.GetRoot();
         var usings = compilationUnit.Usings.Select(x => x.ToString()).ToList();
@@ -167,6 +179,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             bool isEnum = valueTypeSymbol.TypeKind == TypeKind.Enum;
             bool isFlagsEnum = false;
             bool isCollection = false;
+            CollectionType collectionType = CollectionType.None;
             bool isDictionary = false;
 
             if (!isString && TryGetEnumerableElementType(member.Type, simpleCliContext, out var elementType))
@@ -187,8 +200,15 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
                 else
                 {
-                    valueTypeSymbol = elementType;
-                    isCollection = true;
+                    if (TryGetCollectionType(member.Type, elementType, simpleCliContext, out collectionType))
+                    {
+                        valueTypeSymbol = elementType;
+                        isCollection = true;
+                    }
+                    else
+                    {
+                        // TODO: Diagnostig unsupported collection type.
+                    }
                 }
             }
 
@@ -309,6 +329,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     OptionName: optName,
                     ShortName: shortName,
                     IsCollection: isCollection,
+                    CollectionType: collectionType,
                     IsDictionary: isDictionary,
                     IsEnum: isEnum,
                     IsFlagsEnum: isFlagsEnum));
@@ -445,6 +466,78 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             return true;
         }
 
+        return false;
+    }
+
+    private static bool TryGetCollectionType(
+        ITypeSymbol type,
+        ITypeSymbol elementType,
+        SimpleCliCompilationContext simpleCliContext,
+        out CollectionType collectionType)
+    {
+        if (type.TypeKind == TypeKind.Array)
+        {
+            collectionType = CollectionType.Array;
+            return true;
+        }
+
+        if (type is INamedTypeSymbol named)
+        {
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ListOfTSymbol?.Construct(elementType)))
+            {
+                collectionType = CollectionType.ListCompatible;
+                return true;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableArrayOfTSymbol?.Construct(elementType)))
+            {
+                collectionType = CollectionType.ImmutableArray;
+                return true;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableListOfTSymbol?.Construct(elementType)))
+            {
+                collectionType = CollectionType.ImmutableList;
+                return true;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableHashSetOfTSymbol?.Construct(elementType)))
+            {
+                collectionType = CollectionType.ImmutableHashSet;
+                return true;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.FrozenSetOfTSymbol?.Construct(elementType)))
+            {
+                collectionType = CollectionType.FrozenSet;
+                return true;
+            }
+
+            if (simpleCliContext.SupportedEnumerableOfTInterfaceSymbols.Any(s => SymbolEqualityComparer.Default.Equals(named, s.Construct(elementType))))
+            {
+                collectionType = CollectionType.ListCompatible;
+                return true;
+            }
+
+            var constructor = named.InstanceConstructors.FirstOrDefault(c =>
+                c.DeclaredAccessibility == Accessibility.Public
+                &&
+                c.Parameters.Length == 1
+                &&
+                c.Parameters[0].Type is INamedTypeSymbol paramType
+                &&
+                paramType.IsGenericType
+                &&
+                SymbolEqualityComparer.Default.Equals(paramType.OriginalDefinition, simpleCliContext.EnumerableOfTSymbol));
+
+            if (constructor != null)
+            {
+                collectionType = CollectionType.ConstructorCompatible;
+                return true;
+            }
+        }
+
+        collectionType = CollectionType.None;
         return false;
     }
 
@@ -780,9 +873,37 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     code.AppendLine("if (errors.Count == 0)");
                     using (code.StartBlock())
                     {
+                        var hasFinalizedCollections = false;
                         foreach (var collectionOpt in options.Where(o => o.IsCollection))
                         {
+                            hasFinalizedCollections = true;
 
+                            switch (collectionOpt.CollectionType)
+                            {
+                                case CollectionType.Array:
+                                    code.AppendLine($"{collectionOpt.TypeName} finalOpt_{collectionOpt.Name} = opt_{collectionOpt.Name}.ToArray();");
+                                    break;
+                                case CollectionType.ConstructorCompatible:
+                                    code.AppendLine($"{collectionOpt.TypeName} finalOpt_{collectionOpt.Name} = new {collectionOpt.TypeName}(opt_{collectionOpt.Name});");
+                                    break;
+                                case CollectionType.ImmutableArray:
+                                    code.AppendLine($"{collectionOpt.TypeName} finalOpt_{collectionOpt.Name} = global::System.Collections.Immutable.ImmutableArray.CreateRange<{collectionOpt.ValueTypeName}>(opt_{collectionOpt.Name});");
+                                    break;
+                                case CollectionType.ImmutableList:
+                                    code.AppendLine($"{collectionOpt.TypeName} finalOpt_{collectionOpt.Name} = global::System.Collections.Immutable.ImmutableList.CreateRange<{collectionOpt.ValueTypeName}>(opt_{collectionOpt.Name});");
+                                    break;
+                                case CollectionType.ImmutableHashSet:
+                                    code.AppendLine($"{collectionOpt.TypeName} finalOpt_{collectionOpt.Name} = global::System.Collections.Immutable.ImmutableHashSet.CreateRange<{collectionOpt.ValueTypeName}>(opt_{collectionOpt.Name});");
+                                    break;
+                                case CollectionType.FrozenSet:
+                                    code.AppendLine($"{collectionOpt.TypeName} finalOpt_{collectionOpt.Name} = global::System.Collections.Frozen.FrozenSet.ToFrozenSet<{collectionOpt.ValueTypeName}>(opt_{collectionOpt.Name});");
+                                    break;
+                            }
+                        }
+
+                        if (hasFinalizedCollections)
+                        {
+                            code.AppendLine();
                         }
 
                         foreach (var dictionaryOpt in options.Where(o => o.IsDictionary))
@@ -806,7 +927,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                 code.AppendLine(prop switch
                                 {
                                     ArgumentPropertyModel apm => $"{prop.Name} = arg_{prop.Name},",
-                                    OptionPropertyModel opm when opm.IsDictionary => $"{prop.Name} = finalOpt_{prop.Name},",
+                                    OptionPropertyModel opm when IsFinalized(opm) => $"{prop.Name} = finalOpt_{prop.Name},",
                                     OptionPropertyModel opm => $"{prop.Name} = opt_{prop.Name},",
                                     _ => "// Unknown model",
                                 });
@@ -1192,6 +1313,23 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             default:
                 break;
         }
+    }
+
+    private static bool IsFinalized(PropertyModel model)
+    {
+        if (model.IsCollection)
+        {
+            return model.CollectionType != CollectionType.None
+                &&
+                model.CollectionType != CollectionType.ListCompatible;
+        }
+
+        if (model.IsDictionary)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     #endregion

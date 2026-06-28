@@ -21,6 +21,7 @@ internal record ArgumentPropertyModel(
     SpecialType,
     IsRequired,
     false,
+    CollectionType.None,
     false,
     IsEnum,
     false,

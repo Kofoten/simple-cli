@@ -10,5 +10,10 @@ public record SimpleCliCompilationContext(
     INamedTypeSymbol? FlagsAttributeSymbol,
     INamedTypeSymbol? EnumerableOfTSymbol,
     INamedTypeSymbol? KeyValuePairOfT2Symbol,
+    INamedTypeSymbol? ListOfTSymbol,
+    INamedTypeSymbol? ImmutableArrayOfTSymbol,
+    INamedTypeSymbol? ImmutableListOfTSymbol,
+    INamedTypeSymbol? ImmutableHashSetOfTSymbol,
+    INamedTypeSymbol? FrozenSetOfTSymbol,
     IEnumerable<INamedTypeSymbol> SupportedEnumerableOfTInterfaceSymbols,
     bool HasDependencyInjection);

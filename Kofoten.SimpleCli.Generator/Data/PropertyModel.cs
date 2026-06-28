@@ -10,6 +10,7 @@ internal abstract record PropertyModel(
     SpecialType SpecialType,
     bool IsRequired,
     bool IsCollection,
+    CollectionType CollectionType,
     bool IsDictionary,
     bool IsEnum,
     bool IsFlagsEnum,

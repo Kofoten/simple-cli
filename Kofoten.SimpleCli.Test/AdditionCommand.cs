@@ -14,7 +14,7 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
     public required int SecondNumber { get; init; }
 
     [CliOption("additional-numbers", Short = 'a', Description = "Additional numbers to add.")]
-    public IEnumerable<int> AdditionalNumbers { get; init; } = [];
+    public int[] AdditionalNumbers { get; init; } = [];
 
     [CliOption("verbose", Short = 'V', Description = "Print the result of each addidtion.")]
     public bool Verbose { get; init; } = false;
@@ -39,6 +39,9 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
 
     [CliOption("indexed-cheese")]
     public Dictionary<int, Cheese> IndexedCheeses { get; init; } = [];
+
+    [CliOption("frozen-cheese")]
+    public CheeseCollection FrozenCheese { get; init; } = [];
 
     public int Execute()
     {
