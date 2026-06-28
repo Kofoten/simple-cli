@@ -1,9 +1,11 @@
 ﻿namespace Kofoten.SimpleCli.Test.Data;
 
+[Flags]
 public enum Weather
 {
-    Sunny,
-    Snowy,
-    Rainy,
-    Cloudy,
+    Unknown = 0,
+    Sunny = 1,
+    Snowy = 2,
+    Rainy = 4,
+    Cloudy = 8,
 }

@@ -5,7 +5,7 @@ namespace Kofoten.SimpleCli.Generator.Data;
 internal record ArgumentPropertyModel(
     string Name,
     string TypeName,
-    string ParseTypeName,
+    string ValueTypeName,
     SpecialType SpecialType,
     bool IsRequired,
     bool IsEnum,
@@ -16,12 +16,14 @@ internal record ArgumentPropertyModel(
 ) : PropertyModel(
     Name,
     TypeName,
-    ParseTypeName,
+    ValueTypeName,
+    null,
     SpecialType,
     IsRequired,
     false,
     false,
     IsEnum,
+    false,
     Description,
     ParseMethodName,
     HasErrorMessageOut);

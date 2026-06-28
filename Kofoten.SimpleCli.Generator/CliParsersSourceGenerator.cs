@@ -98,6 +98,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         var optAttributeSymbol = compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliOptionAttribute");
 
         var enumerableSymbol = compilation.GetTypeByMetadataName("System.Collections.Generic.IEnumerable`1");
+        var flagsAttributeSymbol = compilation.GetTypeByMetadataName("System.FlagsAttribute");
 
         var properties = new List<PropertyModel>();
         foreach (var member in classSymbol.GetMembers().OfType<IPropertySymbol>())
@@ -109,9 +110,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 SymbolEqualityComparer.Default.Equals(a.AttributeClass, optAttributeSymbol));
 
             string typeName = member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            ITypeSymbol parseTypeSymbol = member.Type;
-            bool isString = parseTypeSymbol.SpecialType == SpecialType.System_String;
-            bool isEnum = parseTypeSymbol.TypeKind == TypeKind.Enum;
+            ITypeSymbol valueTypeSymbol = member.Type;
+            bool isString = valueTypeSymbol.SpecialType == SpecialType.System_String;
+            bool isEnum = valueTypeSymbol.TypeKind == TypeKind.Enum;
+            bool isFlagsEnum = false;
             bool isCollection = false;
             bool isDictionary = false;
 
@@ -127,11 +129,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     return new CommandGenerationResult(null, diagnostics.ToImmutable());
                 }
 
-                parseTypeSymbol = elementType;
+                valueTypeSymbol = elementType;
                 isCollection = true;
             }
 
-            string parseTypeName = parseTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            string valueTypeName = valueTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             string parserMethodName = string.Empty;
             bool isValidParser = false;
             bool hasErrorMessageOut = false;
@@ -139,12 +141,13 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             if (isEnum)
             {
                 isValidParser = true;
+                isFlagsEnum = valueTypeSymbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, flagsAttributeSymbol));
             }
             else if (!isString)
             {
                 string targetMethodName = "TryParse";
-                (isValidParser, hasErrorMessageOut) = InspectParserSignature(parseTypeSymbol, targetMethodName);
-                parserMethodName = $"{parseTypeName}.{targetMethodName}";
+                (isValidParser, hasErrorMessageOut) = InspectParserSignature(valueTypeSymbol, targetMethodName);
+                parserMethodName = $"{valueTypeName}.{targetMethodName}";
             }
 
             if (!isValidParser)
@@ -177,8 +180,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 properties.Add(new ArgumentPropertyModel(
                     Name: member.Name,
                     TypeName: typeName,
-                    ParseTypeName: parseTypeName,
-                    SpecialType: parseTypeSymbol.SpecialType,
+                    ValueTypeName: valueTypeName,
+                    SpecialType: valueTypeSymbol.SpecialType,
                     IsRequired: member.IsRequired,
                     Description: description,
                     ParseMethodName: parserMethodName,
@@ -219,8 +222,9 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 properties.Add(new OptionPropertyModel(
                     Name: member.Name,
                     TypeName: typeName,
-                    ParseTypeName: parseTypeName,
-                    SpecialType: parseTypeSymbol.SpecialType,
+                    ValueTypeName: valueTypeName,
+                    KeyTypeName: null,
+                    SpecialType: valueTypeSymbol.SpecialType,
                     IsRequired: member.IsRequired,
                     Description: description,
                     ParseMethodName: parserMethodName,
@@ -230,7 +234,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     ShortName: shortName,
                     IsCollection: isCollection,
                     IsDictionary: isDictionary,
-                    IsEnum: isEnum));
+                    IsEnum: isEnum,
+                    IsFlagsEnum: isFlagsEnum));
             }
         }
 
@@ -560,7 +565,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     {
                         if (opt.IsCollection)
                         {
-                            code.AppendLine($"global::System.Collections.Generic.List<{opt.ParseTypeName}> opt_{opt.Name} = new global::System.Collections.Generic.List<{opt.ParseTypeName}>();");
+                            code.AppendLine($"global::System.Collections.Generic.List<{opt.ValueTypeName}> opt_{opt.Name} = new global::System.Collections.Generic.List<{opt.ValueTypeName}>();");
                         }
                         else if (opt.TypeName == "bool")
                         {
@@ -649,7 +654,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                         }
                                     }
 
-                                    if (!opt.IsCollection)
+                                    if (!opt.IsCollection && !opt.IsFlagsEnum)
                                     {
                                         code.AppendLine("state = 0;");
                                     }
@@ -905,10 +910,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             case ArgumentPropertyModel argModel:
                 if (argModel.IsEnum)
                 {
-                    code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ParseTypeName}>(args.Array[args.Offset + {argModel.Position}], true, out arg_{argModel.Name}))", applyIndent: true);
+                    code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>(args.Array[args.Offset + {argModel.Position}], true, out arg_{argModel.Name}))", applyIndent: true);
                     using (code.StartBlock())
                     {
-                        code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ParseTypeName}\");");
+                        code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ValueTypeName}\");");
                     }
                 }
                 else
@@ -927,7 +932,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         code.AppendLine("))", applyIndent: false);
                         using (code.StartBlock())
                         {
-                            code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ParseTypeName}\");");
+                            code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ValueTypeName}\");");
                         }
                     }
                 }
@@ -935,11 +940,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             case OptionPropertyModel optModel:
                 if (optModel.IsEnum)
                 {
-                    code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ParseTypeName}>(args.Array[args.Offset + i], true, out {optModel.ParseTypeName} v))");
+                    code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(args.Array[args.Offset + i], true, out {optModel.ValueTypeName} v))");
                 }
                 else
                 {
-                    code.Append($"if ({optModel.ParseMethodName}(args.Array[args.Offset + i], out {optModel.ParseTypeName} v", applyIndent: true);
+                    code.Append($"if ({optModel.ParseMethodName}(args.Array[args.Offset + i], out {optModel.ValueTypeName} v", applyIndent: true);
                     if (optModel.HasErrorMessageOut)
                     {
                         code.Append(", out global::System.String customError");
@@ -949,7 +954,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
                 using (code.StartBlock())
                 {
-                    if (model.IsCollection)
+                    if (model.IsFlagsEnum)
+                    {
+                        code.AppendLine($"opt_{optModel.Name} |= v;");
+                    }
+                    else if (model.IsCollection)
                     {
                         code.AppendLine($"opt_{optModel.Name}.Add(v);");
                     }
@@ -967,7 +976,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
                     else
                     {
-                        code.AppendLine($"errors.Add($\"Invalid {optModel.ParseTypeName} value ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                        code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
                     }
                 }
                 break;
