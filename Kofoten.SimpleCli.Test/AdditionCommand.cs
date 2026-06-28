@@ -37,6 +37,9 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
     [CliOption("weather", Short = 'w', Description = "Whats the weather")]
     public Weather Weather { get; init; } = Weather.Sunny;
 
+    [CliOption("indexed-cheese")]
+    public Dictionary<int, Cheese> IndexedCheeses { get; init; } = [];
+
     public int Execute()
     {
         int[] allNumbers = [FirstNumber, SecondNumber, .. AdditionalNumbers];

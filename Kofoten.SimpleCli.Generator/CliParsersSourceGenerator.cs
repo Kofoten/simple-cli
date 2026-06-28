@@ -15,10 +15,81 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var commandModels = context.SyntaxProvider
+        var classDeclarations = context.SyntaxProvider
             .CreateSyntaxProvider(
                 predicate: static (s, _) => s is ClassDeclarationSyntax c && c.BaseList is not null,
-                transform: static (ctx, _) => GetCommandTarget(ctx));
+                transform: static (ctx, _) => (ClassDeclarationSyntax)ctx.Node);
+
+        var simpleCliCompilationContextProvider = context.CompilationProvider.Select(static (compilation, _) =>
+        {
+            var diRouterSymbol = compilation.GetTypeByMetadataName("Kofoten.SimpleCli.DependencyInjection.DependencyInjectionCliCommandRouter");
+            var serviceProviderSymbol = compilation.GetTypeByMetadataName("System.IServiceProvider");
+            var getRequiredServiceExtensionsSymbol = compilation.GetTypeByMetadataName("Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions");
+
+            var hasDependencyInjection =
+                diRouterSymbol is not null
+                &&
+                serviceProviderSymbol is not null
+                &&
+                getRequiredServiceExtensionsSymbol is not null;
+
+            var supportedEnumerableOfTInterfaces = new List<INamedTypeSymbol>(5);
+
+            var enumerableOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IEnumerable`1");
+            if (enumerableOfT != null)
+            {
+                supportedEnumerableOfTInterfaces.Add(enumerableOfT);
+            }
+
+            var collectionOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.ICollection`1");
+            if (collectionOfT != null)
+            {
+                supportedEnumerableOfTInterfaces.Add(collectionOfT);
+            }
+
+            var readOnlyCollectionOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyCollection`1");
+            if (readOnlyCollectionOfT != null)
+            {
+                supportedEnumerableOfTInterfaces.Add(readOnlyCollectionOfT);
+            }
+
+            var listOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IList`1");
+            if (listOfT != null)
+            {
+                supportedEnumerableOfTInterfaces.Add(listOfT);
+            }
+
+            var readOnlyListOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyList`1");
+            if (readOnlyListOfT != null)
+            {
+                supportedEnumerableOfTInterfaces.Add(readOnlyListOfT);
+            }
+
+            return new SimpleCliCompilationContext(
+                CliParsableSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.ICliParsable"),
+                CliArgumentAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliArgumentAttribute"),
+                CliOptionAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliOptionAttribute"),
+                FlagsAttributeSymbol: compilation.GetTypeByMetadataName("System.FlagsAttribute"),
+                EnumerableOfTSymbol: enumerableOfT,
+                KeyValuePairOfT2Symbol: compilation.GetTypeByMetadataName("System.Collections.Generic.KeyValuePair`2"),
+                SupportedEnumerableOfTInterfaceSymbols: supportedEnumerableOfTInterfaces,
+                HasDependencyInjection: hasDependencyInjection);
+        });
+
+        var combinedProvider = classDeclarations
+            .Combine(context.CompilationProvider)
+            .Combine(simpleCliCompilationContextProvider);
+
+        var commandModels = combinedProvider.Select(static (source, _) =>
+        {
+            var classDecl = source.Left.Left;
+            var compilation = source.Left.Right;
+            var simpleCliContext = source.Right;
+
+            var semanticModel = compilation.GetSemanticModel(classDecl.SyntaxTree);
+
+            return GetCommandTarget(classDecl, semanticModel, simpleCliContext);
+        });
 
         context.RegisterSourceOutput(commandModels, static (spc, result) =>
         {
@@ -36,35 +107,21 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
     #region BuildCommandModel
 
-    private static CommandGenerationResult GetCommandTarget(GeneratorSyntaxContext context)
+    private static CommandGenerationResult GetCommandTarget(ClassDeclarationSyntax classDecl, SemanticModel semanticModel, SimpleCliCompilationContext simpleCliContext)
     {
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
-        var classDecl = (ClassDeclarationSyntax)context.Node;
         var compilationUnit = (CompilationUnitSyntax)classDecl.SyntaxTree.GetRoot();
         var usings = compilationUnit.Usings.Select(x => x.ToString()).ToList();
 
-        if (context.SemanticModel.GetDeclaredSymbol(classDecl) is not INamedTypeSymbol classSymbol)
+        if (semanticModel.GetDeclaredSymbol(classDecl) is not INamedTypeSymbol classSymbol)
         {
             return new CommandGenerationResult(null, diagnostics.ToImmutable());
         }
 
-        var compilation = context.SemanticModel.Compilation;
-
-        var diRouterSymbol = compilation.GetTypeByMetadataName("Kofoten.SimpleCli.DependencyInjection.DependencyInjectionCliCommandRouter");
-        var serviceProviderSymbol = compilation.GetTypeByMetadataName("System.IServiceProvider");
-        var getRequiredServiceExtensionsSymbol = compilation.GetTypeByMetadataName("Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions");
-
-        var hasDependencyInjection =
-            diRouterSymbol is not null
-            &&
-            serviceProviderSymbol is not null
-            &&
-            getRequiredServiceExtensionsSymbol is not null;
-
-        var parsableCommandSymbol = compilation.GetTypeByMetadataName("Kofoten.SimpleCli.ICliParsable");
+        var compilation = semanticModel.Compilation;
 
         var inheritsCommand = classSymbol.AllInterfaces.Any(interfaceSymbol =>
-            SymbolEqualityComparer.Default.Equals(interfaceSymbol, parsableCommandSymbol));
+            SymbolEqualityComparer.Default.Equals(interfaceSymbol, simpleCliContext.CliParsableSymbol));
 
         if (!inheritsCommand)
         {
@@ -94,30 +151,25 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             ));
         }
 
-        var argAttributeSymbol = compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliArgumentAttribute");
-        var optAttributeSymbol = compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliOptionAttribute");
-
-        var enumerableSymbol = compilation.GetTypeByMetadataName("System.Collections.Generic.IEnumerable`1");
-        var flagsAttributeSymbol = compilation.GetTypeByMetadataName("System.FlagsAttribute");
-
         var properties = new List<PropertyModel>();
         foreach (var member in classSymbol.GetMembers().OfType<IPropertySymbol>())
         {
             var argAttribute = member.GetAttributes().FirstOrDefault(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, argAttributeSymbol));
+                SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliArgumentAttributeSymbol));
 
             var optAttribute = member.GetAttributes().FirstOrDefault(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, optAttributeSymbol));
+                SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliOptionAttributeSymbol));
 
             string typeName = member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             ITypeSymbol valueTypeSymbol = member.Type;
+            ITypeSymbol? keyTypeSymbol = null;
             bool isString = valueTypeSymbol.SpecialType == SpecialType.System_String;
             bool isEnum = valueTypeSymbol.TypeKind == TypeKind.Enum;
             bool isFlagsEnum = false;
             bool isCollection = false;
             bool isDictionary = false;
 
-            if (!isString && TryGetEnumerableElementType(member.Type, compilation, out var elementType))
+            if (!isString && TryGetEnumerableElementType(member.Type, simpleCliContext, out var elementType))
             {
                 if (elementType is null)
                 {
@@ -128,31 +180,53 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
                     return new CommandGenerationResult(null, diagnostics.ToImmutable());
                 }
-
-                valueTypeSymbol = elementType;
-                isCollection = true;
+                else if (TryGetKeyValueTypeArgs(elementType, simpleCliContext, out keyTypeSymbol, out var foundValueType))
+                {
+                    valueTypeSymbol = foundValueType!;
+                    isDictionary = true;
+                }
+                else
+                {
+                    valueTypeSymbol = elementType;
+                    isCollection = true;
+                }
             }
 
             string valueTypeName = valueTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            string parserMethodName = string.Empty;
-            bool isValidParser = false;
-            bool hasErrorMessageOut = false;
+            string? keyTypeName = keyTypeSymbol?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            string valueParserMethodName = string.Empty;
+            string? keyParserMethodName = string.Empty;
+            bool valueHasValidParser = false;
+            bool keyHasValidParser = false;
+            bool valueHasErrorMessageOut = false;
+            bool keyHasErrorMessageOut = false;
 
             if (isEnum)
             {
-                isValidParser = true;
-                isFlagsEnum = valueTypeSymbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, flagsAttributeSymbol));
+                valueHasValidParser = true;
+                isFlagsEnum = valueTypeSymbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.FlagsAttributeSymbol));
             }
             else if (!isString)
             {
                 string targetMethodName = "TryParse";
-                (isValidParser, hasErrorMessageOut) = InspectParserSignature(valueTypeSymbol, targetMethodName);
-                parserMethodName = $"{valueTypeName}.{targetMethodName}";
+                (valueHasValidParser, valueHasErrorMessageOut) = InspectParserSignature(valueTypeSymbol, targetMethodName);
+                valueParserMethodName = $"{valueTypeName}.{targetMethodName}";
+
+                if (isDictionary)
+                {
+                    (keyHasValidParser, keyHasErrorMessageOut) = InspectParserSignature(keyTypeSymbol!, targetMethodName);
+                    keyParserMethodName = $"{keyTypeName}.{targetMethodName}";
+                }
             }
 
-            if (!isValidParser)
+            if (!valueHasValidParser)
             {
-                // TODO: Emit Diagnostic Error for DX: "Type {parseTypeSymbol.Name} does not have a valid parser."
+                // TODO: Emit Diagnostic Error for DX: "Type {valueTypeSymbol.Name} does not have a valid parser."
+            }
+
+            if (!keyHasValidParser && isDictionary)
+            {
+                // TODO: Emit Diagnostic Error for DX: "Type {keyTypeSymbol.Name} does not have a valid parser."
             }
 
             string? defaultValueString = null;
@@ -184,8 +258,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     SpecialType: valueTypeSymbol.SpecialType,
                     IsRequired: member.IsRequired,
                     Description: description,
-                    ParseMethodName: parserMethodName,
-                    HasErrorMessageOut: hasErrorMessageOut,
+                    ValueParseMethodName: valueParserMethodName,
+                    ValueHasErrorMessageOut: valueHasErrorMessageOut,
                     Position: position,
                     IsEnum: isEnum));
             }
@@ -223,12 +297,14 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     Name: member.Name,
                     TypeName: typeName,
                     ValueTypeName: valueTypeName,
-                    KeyTypeName: null,
+                    KeyTypeName: keyTypeName,
                     SpecialType: valueTypeSymbol.SpecialType,
                     IsRequired: member.IsRequired,
                     Description: description,
-                    ParseMethodName: parserMethodName,
-                    HasErrorMessageOut: hasErrorMessageOut,
+                    ValueParseMethodName: valueParserMethodName,
+                    ValueHasErrorMessageOut: valueHasErrorMessageOut,
+                    KeyParseMethodName: keyParserMethodName,
+                    KeyHasErrorMessageOut: keyHasErrorMessageOut,
                     DefaultValueString: defaultValueString,
                     OptionName: optName,
                     ShortName: shortName,
@@ -306,7 +382,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             Description: GetCommandDescription(classSymbol),
             ConstructorParameters: constructorParams,
             Properties: properties,
-            HasDependencyInjection: hasDependencyInjection,
+            HasDependencyInjection: simpleCliContext.HasDependencyInjection,
             Usings: usings);
 
         return new CommandGenerationResult(command, diagnostics.ToImmutable());
@@ -314,20 +390,19 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
     private static bool TryGetEnumerableElementType(
         ITypeSymbol type,
-        Compilation compilation,
+        SimpleCliCompilationContext simpleCliContext,
         out ITypeSymbol? elementType)
     {
         elementType = null;
 
-        var ienumerableOfT = compilation.GetTypeByMetadataName("System.Collections.Generic.IEnumerable`1");
-        if (ienumerableOfT is null)
+        if (simpleCliContext.EnumerableOfTSymbol is null)
         {
             return false;
         }
 
         if (type is INamedTypeSymbol named &&
             named.IsGenericType &&
-            SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, ienumerableOfT))
+            SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, simpleCliContext.EnumerableOfTSymbol))
         {
             elementType = named.TypeArguments[0];
             return true;
@@ -337,11 +412,37 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         {
             if (iface is INamedTypeSymbol i &&
                 i.IsGenericType &&
-                SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, ienumerableOfT))
+                SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, simpleCliContext.EnumerableOfTSymbol))
             {
                 elementType = i.TypeArguments[0];
                 return true;
             }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetKeyValueTypeArgs(
+        ITypeSymbol elementType,
+        SimpleCliCompilationContext simpleCliContext,
+        out ITypeSymbol? keyType,
+        out ITypeSymbol? valueType)
+    {
+        keyType = null;
+        valueType = null;
+
+        if (simpleCliContext.KeyValuePairOfT2Symbol is null)
+        {
+            return false;
+        }
+
+        if (elementType is INamedTypeSymbol named &&
+            named.IsGenericType &&
+            SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, simpleCliContext.KeyValuePairOfT2Symbol))
+        {
+            keyType = named.TypeArguments[0];
+            valueType = named.TypeArguments[1];
+            return true;
         }
 
         return false;
@@ -563,7 +664,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
                     foreach (var opt in options)
                     {
-                        if (opt.IsCollection)
+                        if (opt.IsDictionary)
+                        {
+                            code.AppendLine($"global::System.Collections.Generic.List<global::System.Collections.Generic.KeyValuePair<{opt.KeyTypeName}, {opt.ValueTypeName}>> opt_{opt.Name} = new global::System.Collections.Generic.List<global::System.Collections.Generic.KeyValuePair<{opt.KeyTypeName}, {opt.ValueTypeName}>>();");
+                        }
+                        else if (opt.IsCollection)
                         {
                             code.AppendLine($"global::System.Collections.Generic.List<{opt.ValueTypeName}> opt_{opt.Name} = new global::System.Collections.Generic.List<{opt.ValueTypeName}>();");
                         }
@@ -675,6 +780,22 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     code.AppendLine("if (errors.Count == 0)");
                     using (code.StartBlock())
                     {
+                        foreach (var collectionOpt in options.Where(o => o.IsCollection))
+                        {
+
+                        }
+
+                        foreach (var dictionaryOpt in options.Where(o => o.IsDictionary))
+                        {
+                            code.AppendLine($"var finalOpt_{dictionaryOpt.Name} = new global::System.Collections.Generic.Dictionary<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>();");
+                            code.AppendLine($"foreach (var kvp in opt_{dictionaryOpt.Name})");
+                            using (code.StartBlock())
+                            {
+                                code.AppendLine($"finalOpt_{dictionaryOpt.Name}[kvp.Key] = kvp.Value;");
+                            }
+                            code.AppendLine();
+                        }
+
                         var ctorArgs = string.Join(", ", command.ConstructorParameters.Select(p => p.Name));
                         code.AppendLine($"var command = new {command.ClassName}({ctorArgs})");
                         code.AppendLine("{");
@@ -685,6 +806,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                 code.AppendLine(prop switch
                                 {
                                     ArgumentPropertyModel apm => $"{prop.Name} = arg_{prop.Name},",
+                                    OptionPropertyModel opm when opm.IsDictionary => $"{prop.Name} = finalOpt_{prop.Name},",
                                     OptionPropertyModel opm => $"{prop.Name} = opt_{prop.Name},",
                                     _ => "// Unknown model",
                                 });
@@ -918,8 +1040,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
                 else
                 {
-                    code.Append($"if (!{argModel.ParseMethodName}(args.Array[args.Offset + {argModel.Position}], out arg_{argModel.Name}", applyIndent: true);
-                    if (argModel.HasErrorMessageOut)
+                    code.Append($"if (!{argModel.ValueParseMethodName}(args.Array[args.Offset + {argModel.Position}], out arg_{argModel.Name}", applyIndent: true);
+                    if (argModel.ValueHasErrorMessageOut)
                     {
                         code.AppendLine(", out global::System.String customError))", applyIndent: false);
                         using (code.StartBlock())
@@ -938,18 +1060,95 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
                 break;
             case OptionPropertyModel optModel:
+                IDisposable? dictionaryBlock = null;
+
                 if (optModel.IsEnum)
                 {
                     code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(args.Array[args.Offset + i], true, out {optModel.ValueTypeName} v))");
                 }
                 else
                 {
-                    code.Append($"if ({optModel.ParseMethodName}(args.Array[args.Offset + i], out {optModel.ValueTypeName} v", applyIndent: true);
-                    if (optModel.HasErrorMessageOut)
+                    var valueAccessor = "args.Array[args.Offset + i]";
+
+                    if (optModel.IsDictionary)
                     {
-                        code.Append(", out global::System.String customError");
+                        valueAccessor = "valuePart";
+
+                        code.AppendLine("global::System.String currentArg = args.Array[args.Offset + i];");
+                        code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
+                        code.AppendLine();
+                        code.AppendLine("if (delimiterIndex == -1)");
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine($"errors.Add($\"Invalid format ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}. A key value pair must be delimitered using the equals sign.\");");
+                        }
+                        code.AppendLine("else");
+                        dictionaryBlock = code.StartBlock();
+
+                        code.AppendLine("global::System.String keyPart = currentArg.Substring(0, delimiterIndex);");
+                        code.AppendLine("global::System.String valuePart = currentArg.Substring(delimiterIndex + 1);");
+                        code.AppendLine("global::System.Boolean isValidKVP = true;");
+                        code.AppendLine();
+                        code.Append($"if (!{optModel.KeyParseMethodName}(keyPart, out {optModel.KeyTypeName} k", applyIndent: true);
+
+                        if (optModel.KeyHasErrorMessageOut)
+                        {
+                            code.Append(", out global::System.String customError");
+                        }
+
+                        code.AppendLine("))", applyIndent: false);
+                        using (code.StartBlock())
+                        {
+                            if (optModel.KeyHasErrorMessageOut)
+                            {
+                                code.AppendLine($"errors.Add($\"Failed to parse key for option '--{optModel.OptionName}': {{customError}}\");");
+                            }
+                            else
+                            {
+                                code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                            }
+                            code.AppendLine("isValidKVP = false;");
+                        }
+                        code.AppendLine();
+                        code.Append($"if (!", applyIndent: true);
+                    }
+                    else
+                    {
+                        code.Append($"if (", applyIndent: true);
+                    }
+
+                    code.Append($"{optModel.ValueParseMethodName}({valueAccessor}, out {optModel.ValueTypeName} v");
+                    if (optModel.ValueHasErrorMessageOut)
+                    {
+                        if (optModel.KeyHasErrorMessageOut)
+                        {
+                            code.Append(", out customError");
+                        }
+                        else
+                        {
+                            code.Append(", out global::System.String customError");
+                        }
                     }
                     code.AppendLine("))", applyIndent: false);
+
+                    if (optModel.IsDictionary)
+                    {
+                        using (code.StartBlock())
+                        {
+                            if (optModel.ValueHasErrorMessageOut)
+                            {
+                                code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
+                            }
+                            else
+                            {
+                                code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                            }
+                            code.AppendLine("isValidKVP = false;");
+                        }
+                        code.AppendLine();
+                        code.AppendLine("if (isValidKVP)");
+
+                    }
                 }
 
                 using (code.StartBlock())
@@ -957,6 +1156,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     if (model.IsFlagsEnum)
                     {
                         code.AppendLine($"opt_{optModel.Name} |= v;");
+                    }
+                    else if (model.IsDictionary)
+                    {
+                        code.AppendLine($"opt_{optModel.Name}.Add(new global::System.Collections.Generic.KeyValuePair<{optModel.KeyTypeName}, {optModel.ValueTypeName}>(k, v));");
                     }
                     else if (model.IsCollection)
                     {
@@ -967,18 +1170,24 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         code.AppendLine($"opt_{optModel.Name} = v;");
                     }
                 }
-                code.AppendLine("else");
-                using (code.StartBlock())
+
+                if (!optModel.IsDictionary)
                 {
-                    if (optModel.HasErrorMessageOut)
+                    code.AppendLine("else");
+                    using (code.StartBlock())
                     {
-                        code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
-                    }
-                    else
-                    {
-                        code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                        if (optModel.ValueHasErrorMessageOut)
+                        {
+                            code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
+                        }
+                        else
+                        {
+                            code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                        }
                     }
                 }
+
+                dictionaryBlock?.Dispose();
                 break;
             default:
                 break;

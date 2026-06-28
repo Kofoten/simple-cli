@@ -14,8 +14,10 @@ internal record OptionPropertyModel(
     bool IsEnum,
     bool IsFlagsEnum,
     string Description,
-    string ParseMethodName,
-    bool HasErrorMessageOut,
+    string ValueParseMethodName,
+    bool ValueHasErrorMessageOut,
+    string? KeyParseMethodName,
+    bool KeyHasErrorMessageOut,
     string? DefaultValueString,
     string OptionName,
     char? ShortName
@@ -31,5 +33,7 @@ internal record OptionPropertyModel(
     IsEnum,
     IsFlagsEnum,
     Description,
-    ParseMethodName,
-    HasErrorMessageOut);
+    ValueParseMethodName,
+    ValueHasErrorMessageOut,
+    KeyParseMethodName,
+    KeyHasErrorMessageOut);

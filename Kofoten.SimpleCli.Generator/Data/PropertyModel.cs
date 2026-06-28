@@ -14,5 +14,7 @@ internal abstract record PropertyModel(
     bool IsEnum,
     bool IsFlagsEnum,
     string Description,
-    string ParseMethodName,
-    bool HasErrorMessageOut);
+    string ValueParseMethodName,
+    bool ValueHasErrorMessageOut,
+    string? KeyParseMethodName,
+    bool KeyHasErrorMessageOut);

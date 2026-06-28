@@ -10,8 +10,8 @@ internal record ArgumentPropertyModel(
     bool IsRequired,
     bool IsEnum,
     string Description,
-    string ParseMethodName,
-    bool HasErrorMessageOut,
+    string ValueParseMethodName,
+    bool ValueHasErrorMessageOut,
     int Position
 ) : PropertyModel(
     Name,
@@ -25,5 +25,7 @@ internal record ArgumentPropertyModel(
     IsEnum,
     false,
     Description,
-    ParseMethodName,
-    HasErrorMessageOut);
+    ValueParseMethodName,
+    ValueHasErrorMessageOut,
+    null,
+    false);
