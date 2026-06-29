@@ -65,6 +65,20 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 supportedEnumerableOfTInterfaces.Add(iReadOnlyListOfT);
             }
 
+            var supportedDictionaryOfKVInterfaces = new List<INamedTypeSymbol>();
+
+            var iDictionaryOfKV = compilation.GetTypeByMetadataName("System.Collections.Generic.IDictionary`2");
+            if (iDictionaryOfKV != null)
+            {
+                supportedDictionaryOfKVInterfaces.Add(iDictionaryOfKV);
+            }
+
+            var iReadOnlyDictionaryOfKV = compilation.GetTypeByMetadataName("System.Collections.Generic.IReadOnlyDictionary`2");
+            if (iReadOnlyDictionaryOfKV != null)
+            {
+                supportedDictionaryOfKVInterfaces.Add(iReadOnlyDictionaryOfKV);
+            }
+
             return new SimpleCliCompilationContext(
                 CliParsableSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.ICliParsable"),
                 CliArgumentAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliArgumentAttribute"),
@@ -73,11 +87,15 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 EnumerableOfTSymbol: iEnumerableOfT,
                 KeyValuePairOfT2Symbol: compilation.GetTypeByMetadataName("System.Collections.Generic.KeyValuePair`2"),
                 ListOfTSymbol: compilation.GetTypeByMetadataName("System.Collections.Generic.List`1"),
+                DictionaryOfKVSymbol: compilation.GetTypeByMetadataName("System.Collections.Generic.Dictionary`2"),
                 ImmutableArrayOfTSymbol: compilation.GetTypeByMetadataName("System.Collections.Immutable.ImmutableArray`1"),
                 ImmutableListOfTSymbol: compilation.GetTypeByMetadataName("System.Collections.Immutable.ImmutableList`1"),
                 ImmutableHashSetOfTSymbol: compilation.GetTypeByMetadataName("System.Collections.Immutable.ImmutableHashSet`1"),
+                ImmutableDictionaryOfKVSymbol: compilation.GetTypeByMetadataName("System.Collections.Immutable.ImmutableDictionary`2"),
                 FrozenSetOfTSymbol: compilation.GetTypeByMetadataName("System.Collections.Frozen.FrozenSet`1"),
+                FrozenDictionaryOfKVSymbol: compilation.GetTypeByMetadataName("System.Collections.Frozen.FrozenDictionary`2"),
                 SupportedEnumerableOfTInterfaceSymbols: supportedEnumerableOfTInterfaces,
+                SupportedDictionaryOfKVInterfaceSymbols: supportedDictionaryOfKVInterfaces,
                 HasDependencyInjection: hasDependencyInjection);
         });
 
@@ -195,8 +213,15 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
                 else if (TryGetKeyValueTypeArgs(elementType, simpleCliContext, out keyTypeSymbol, out var foundValueType))
                 {
-                    valueTypeSymbol = foundValueType!;
-                    isDictionary = true;
+                    if (TryGetCollectionType(member.Type, keyTypeSymbol!, foundValueType!, simpleCliContext, out collectionType))
+                    {
+                        valueTypeSymbol = foundValueType!;
+                        isDictionary = true;
+                    }
+                    else
+                    {
+                        // TODO: Diagnostig unsupported collection type.
+                    }
                 }
                 else
                 {
@@ -475,6 +500,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         SimpleCliCompilationContext simpleCliContext,
         out CollectionType collectionType)
     {
+        if (simpleCliContext.EnumerableOfTSymbol == null)
+        {
+            collectionType = CollectionType.None;
+            return false;
+        }
+
         if (type.TypeKind == TypeKind.Array)
         {
             collectionType = CollectionType.Array;
@@ -519,6 +550,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 return true;
             }
 
+            var typedEnumerableSymbol = simpleCliContext.EnumerableOfTSymbol.Construct(elementType);
             var constructor = named.InstanceConstructors.FirstOrDefault(c =>
                 c.DeclaredAccessibility == Accessibility.Public
                 &&
@@ -528,7 +560,117 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 &&
                 paramType.IsGenericType
                 &&
-                SymbolEqualityComparer.Default.Equals(paramType.OriginalDefinition, simpleCliContext.EnumerableOfTSymbol));
+                SymbolEqualityComparer.Default.Equals(paramType, typedEnumerableSymbol));
+
+            if (constructor != null)
+            {
+                collectionType = CollectionType.ConstructorCompatible;
+                return true;
+            }
+        }
+
+        collectionType = CollectionType.None;
+        return false;
+    }
+
+    /// <summary>
+    /// A version of TryGetCollectionType that looks for collections of <see cref="KeyValuePair{TKey, TValue}"/> items including dictionary collections.
+    /// </summary>
+    private static bool TryGetCollectionType(
+        ITypeSymbol type,
+        ITypeSymbol keyType,
+        ITypeSymbol valueType,
+        SimpleCliCompilationContext simpleCliContext,
+        out CollectionType collectionType)
+    {
+        if (simpleCliContext.KeyValuePairOfT2Symbol == null
+            ||
+            simpleCliContext.EnumerableOfTSymbol == null)
+        {
+            collectionType = CollectionType.None;
+            return false;
+        }
+
+        if (type.TypeKind == TypeKind.Array)
+        {
+            collectionType = CollectionType.Array;
+            return true;
+        }
+
+        var keyValuePairSymbol = simpleCliContext.KeyValuePairOfT2Symbol.Construct(keyType, valueType);
+        if (type is INamedTypeSymbol named)
+        {
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.DictionaryOfKVSymbol?.Construct(keyType, valueType)))
+            {
+                collectionType = CollectionType.DictionaryCompatible;
+                return true;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableDictionaryOfKVSymbol?.Construct(keyType, valueType)))
+            {
+                collectionType = CollectionType.ImmutableDictionary;
+                return true;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.FrozenDictionaryOfKVSymbol?.Construct(keyType, valueType)))
+            {
+                collectionType = CollectionType.FrozenDictionary;
+                return true;
+            }
+
+            if (simpleCliContext.SupportedDictionaryOfKVInterfaceSymbols.Any(s => SymbolEqualityComparer.Default.Equals(named, s.Construct(keyType, valueType))))
+            {
+                collectionType = CollectionType.DictionaryCompatible;
+                return true;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ListOfTSymbol?.Construct(keyValuePairSymbol)))
+            {
+                collectionType = CollectionType.ListCompatible;
+                return true;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableArrayOfTSymbol?.Construct(keyValuePairSymbol)))
+            {
+                collectionType = CollectionType.ImmutableArray;
+                return true;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableListOfTSymbol?.Construct(keyValuePairSymbol)))
+            {
+                collectionType = CollectionType.ImmutableList;
+                return true;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableHashSetOfTSymbol?.Construct(keyValuePairSymbol)))
+            {
+                collectionType = CollectionType.ImmutableHashSet;
+                return true;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.FrozenSetOfTSymbol?.Construct(keyValuePairSymbol)))
+            {
+                collectionType = CollectionType.FrozenSet;
+                return true;
+            }
+
+            if (simpleCliContext.SupportedEnumerableOfTInterfaceSymbols.Any(s => SymbolEqualityComparer.Default.Equals(named, s.Construct(keyValuePairSymbol))))
+            {
+                collectionType = CollectionType.ListCompatible;
+                return true;
+            }
+
+            var typedEnumerableSymbol = simpleCliContext.EnumerableOfTSymbol.Construct(keyValuePairSymbol);
+            var constructor = named.InstanceConstructors.FirstOrDefault(c =>
+                c.DeclaredAccessibility == Accessibility.Public
+                &&
+                c.Parameters.Length == 1
+                &&
+                c.Parameters[0].Type is INamedTypeSymbol paramType
+                &&
+                paramType.IsGenericType
+                &&
+                SymbolEqualityComparer.Default.Equals(paramType, typedEnumerableSymbol));
 
             if (constructor != null)
             {
@@ -901,19 +1043,45 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             }
                         }
 
-                        if (hasFinalizedCollections)
-                        {
-                            code.AppendLine();
-                        }
-
+                        var hasFinalizedDictionaries = false;
                         foreach (var dictionaryOpt in options.Where(o => o.IsDictionary))
                         {
-                            code.AppendLine($"var finalOpt_{dictionaryOpt.Name} = new global::System.Collections.Generic.Dictionary<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>();");
-                            code.AppendLine($"foreach (var kvp in opt_{dictionaryOpt.Name})");
-                            using (code.StartBlock())
+                            hasFinalizedDictionaries = true;
+
+                            switch (dictionaryOpt.CollectionType)
                             {
-                                code.AppendLine($"finalOpt_{dictionaryOpt.Name}[kvp.Key] = kvp.Value;");
+                                case CollectionType.Array:
+                                    code.AppendLine($"{dictionaryOpt.TypeName} finalOpt_{dictionaryOpt.Name} = opt_{dictionaryOpt.Name}.ToArray();");
+                                    break;
+                                case CollectionType.ConstructorCompatible:
+                                    code.AppendLine($"{dictionaryOpt.TypeName} finalOpt_{dictionaryOpt.Name} = new {dictionaryOpt.TypeName}(opt_{dictionaryOpt.Name});");
+                                    break;
+                                case CollectionType.ImmutableArray:
+                                    code.AppendLine($"{dictionaryOpt.TypeName} finalOpt_{dictionaryOpt.Name} = global::System.Collections.Immutable.ImmutableArray.CreateRange<global::System.Collections.Generic.KeyValuePair<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>>(opt_{dictionaryOpt.Name});");
+                                    break;
+                                case CollectionType.ImmutableList:
+                                    code.AppendLine($"{dictionaryOpt.TypeName} finalOpt_{dictionaryOpt.Name} = global::System.Collections.Immutable.ImmutableList.CreateRange<global::System.Collections.Generic.KeyValuePair<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>>(opt_{dictionaryOpt.Name});");
+                                    break;
+                                case CollectionType.ImmutableHashSet:
+                                    code.AppendLine($"{dictionaryOpt.TypeName} finalOpt_{dictionaryOpt.Name} = global::System.Collections.Immutable.ImmutableHashSet.CreateRange<global::System.Collections.Generic.KeyValuePair<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>>(opt_{dictionaryOpt.Name});");
+                                    break;
+                                case CollectionType.ImmutableDictionary:
+                                    code.AppendLine($"{dictionaryOpt.TypeName} finalOpt_{dictionaryOpt.Name} = global::System.Collections.Immutable.ImmutableDictionary<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>.Empty.SetItems(opt_{dictionaryOpt.Name});");
+                                    break;
+                                case CollectionType.FrozenSet:
+                                    code.AppendLine($"{dictionaryOpt.TypeName} finalOpt_{dictionaryOpt.Name} = global::System.Collections.Frozen.FrozenSet.ToFrozenSet<global::System.Collections.Generic.KeyValuePair<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>>(opt_{dictionaryOpt.Name});");
+                                    break;
+                                case CollectionType.FrozenDictionary:
+                                    code.AppendLine($"{dictionaryOpt.TypeName} finalOpt_{dictionaryOpt.Name} = global::System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>(opt_{dictionaryOpt.Name});");
+                                    break;
+                                case CollectionType.DictionaryCompatible:
+                                    code.AppendLine($"var finalOpt_{dictionaryOpt.Name} = global::Kofoten.SimpleCli.CliUtilities.CreateDictionaryWithOverwrite<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>(opt_{dictionaryOpt.Name});");
+                                    break;
                             }
+                        }
+
+                        if (hasFinalizedCollections || hasFinalizedDictionaries)
+                        {
                             code.AppendLine();
                         }
 
@@ -1317,19 +1485,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
     private static bool IsFinalized(PropertyModel model)
     {
-        if (model.IsCollection)
-        {
-            return model.CollectionType != CollectionType.None
-                &&
-                model.CollectionType != CollectionType.ListCompatible;
-        }
 
-        if (model.IsDictionary)
-        {
-            return true;
-        }
-
-        return false;
+        return model.CollectionType != CollectionType.None
+            &&
+            model.CollectionType != CollectionType.ListCompatible;
     }
 
     #endregion

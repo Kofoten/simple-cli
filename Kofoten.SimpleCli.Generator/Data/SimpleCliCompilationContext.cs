@@ -11,9 +11,13 @@ public record SimpleCliCompilationContext(
     INamedTypeSymbol? EnumerableOfTSymbol,
     INamedTypeSymbol? KeyValuePairOfT2Symbol,
     INamedTypeSymbol? ListOfTSymbol,
+    INamedTypeSymbol? DictionaryOfKVSymbol,
     INamedTypeSymbol? ImmutableArrayOfTSymbol,
     INamedTypeSymbol? ImmutableListOfTSymbol,
     INamedTypeSymbol? ImmutableHashSetOfTSymbol,
+    INamedTypeSymbol? ImmutableDictionaryOfKVSymbol,
     INamedTypeSymbol? FrozenSetOfTSymbol,
+    INamedTypeSymbol? FrozenDictionaryOfKVSymbol,
     IEnumerable<INamedTypeSymbol> SupportedEnumerableOfTInterfaceSymbols,
+    IEnumerable<INamedTypeSymbol> SupportedDictionaryOfKVInterfaceSymbols,
     bool HasDependencyInjection);
