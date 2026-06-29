@@ -2,7 +2,11 @@
 
 This cli library was built because I could not find anything out there which had exactly what I wanted and the developer experience I wanted. I wanted super simple DX with full support for NativeAOT and seamless integration with dependency injection (using `Kofoten.SimpleCli.DependencyInjection`). I built this specifically to solve cli parsing, nothing else. I did not want to have a super generic do it all cli tool with all the fancy features. This cli library is therefore highly opinionated and is extremely simple to use.
 
-Example code (using dependency injection):
+## Usage
+
+This library is designed to be incredibly easy to use and requires minimal effort to get up and running.
+
+### Example implementation
 
 AdditionCommand.cs
 
@@ -50,7 +54,42 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
 }
 ```
 
-Program.cs
+Program.cs (single command app)
+
+```c#
+using Kofoten.SimpleCli;
+
+return AdditionCommandParser.Parse(args, new()).Execute();
+```
+
+Program.cs (with subcommand routing)
+
+```c#
+using Kofoten.SimpleCli;
+
+var router = new CliCommandRouter(ErrorHandler);
+router.Map("math", sr =>
+{
+    sr.MapAdditionCommand("add", new());
+});
+
+return router.GetCommand(args).Execute();
+
+static int ErrorHandler(IEnumerable<string> errors, string helpText)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine("Command failed with the following errors:");
+    foreach (var error in errors)
+    {
+        Console.WriteLine($"- {error}");
+    }
+    Console.ResetColor();
+    Console.WriteLine(helpText);
+    return 1;
+}
+```
+
+Program.cs (using dependency injection)
 
 ```c#
 using Kofoten.SimpleCli;
@@ -81,32 +120,6 @@ static int ErrorHandler(IEnumerable<string> errors, string helpText)
 }
 ```
 
-## Limitations
-
-There are some limitations in what kind of cli that can be designed. Some limitations are active decisions where others are unfortunate side effects or uncompleted features.
-
-### Fixed limitations
-
-- The options `-h` and `--help` are reserved to print help text.
-- No rich console UI (There are many other great libraries out there and i have no interest in developing such).
-- No configuration file or environment variable binding (use existing builtin features).
-
-### May change
-
-- Arguments must come before any options.
-- Arguments are currently restricted to single value types.
-- There is no detection for unknown options. Example: The only existing option is `--hello`, if the user writes `--x` nothing will happen and if the user writes `--hello --x` then `--x` will be passed as the value of `--hello`.
-- No support for `-` to indicate reading from stdin.
-- No support for `--` to indicate the end of options.
-- No middleware or interception pipeline.
-
-### Will change (probably)
-
-- No validation pipeline.
-- No custom parsers.
-- No hidden or global options.
-- No shell auto completions.
-
 ## Supported property types
 
 ### Single value types
@@ -118,6 +131,12 @@ There are two possible signatures that can be used:
 - `public static bool TryParse(string s, out T value, out string error)`
 
 Implement the second version if you want to provide a specific error message to the user.
+
+#### Enums
+
+Standard C# `enum` types are natively supported and do not require a custom `TryParse` method. Furthermore, enums marked with the `[Flags]` attribute are fully supported, allowing users to pass the option multiple times to combine bitwise flags automatically.
+
+⚠️ Avoid adding a flags enum as a multi value property (`IEnumerable<YourFlagsEnum>`) since that may result in undefined behaviour.
 
 ### Multi value types
 
@@ -145,6 +164,8 @@ Remember that the rules for [single value types](#single-value-types) apply to t
 Key value pairs are passed using the equals sign as the delimiter. Example `--headers Accept=text/html`
 Remember that the rules for [single value types](#single-value-types) apply to both the key and value type.
 
+**Supported types**:
+
 - `System.Collections.Generic.Dictionary<TKey, TValue>`
 - `System.Collections.Frozen.FrozenDictionary<TKey, TValue>`
 - `System.Collections.Immutable.ImmutableDictionary<TKey, TValue>`
@@ -165,3 +186,29 @@ Remember that the rules for [single value types](#single-value-types) apply to b
   - `System.Collections.Generic.IList<System.Collections.Generic.KeyValuePair<TKey, TValue>>`
   - `System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<TKey, TValue>>`
 - **Any** type that implements `System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<TKey, TValue>>` and has a public constructor that takes a single parameter of type `System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<TKey, TValue>>`
+
+## Limitations
+
+There are some limitations in what kind of cli that can be designed. Some limitations are active design decisions where others are unfortunate side effects or uncompleted features.
+
+### Firm constraints
+
+- The options `-h` and `--help` are reserved to print help text.
+- No rich console UI (There are many other great libraries out there and i have no interest in developing such).
+- No configuration file or environment variable binding (use existing builtin features).
+
+### May change
+
+- Arguments must come before any options.
+- Arguments are currently restricted to single value types.
+- There is no detection for unknown options. Example: The only existing option is `--hello`, if the user writes `--x` nothing will happen and if the user writes `--hello --x` then `--x` will be passed as the value of `--hello`.
+- No support for `-` to indicate reading from stdin.
+- No support for `--` to indicate the end of options.
+- No middleware or interception pipeline.
+
+### Will change (probably)
+
+- No validation pipeline.
+- No custom parsers.
+- No hidden or global options.
+- No shell auto completions.
