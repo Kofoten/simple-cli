@@ -1238,19 +1238,14 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         code.AppendLine("case global::Kofoten.SimpleCli.CliParseResult.Failure failure:");
                         using (code.Indent())
                         {
-                            code.AppendLine("global::System.Text.StringBuilder messageBuilder = new global::System.Text.StringBuilder();");
-                            code.AppendLine("messageBuilder.AppendLine(\"Failed to parse arguments:\");");
-                            code.AppendLine("foreach (var error in failure.Errors)");
-                            using (code.StartBlock())
-                            {
-                                code.AppendLine("messageBuilder.AppendLine($\"\\t{error}\");");
-                            }
-                            code.AppendLine("throw new ArgumentException(messageBuilder.ToString());");
+                            code.AppendLine("throw new CliParseException(failure.Errors, GetHelpText(global::System.String.Empty));");
                         }
-                        code.AppendLine("break;");
+                        code.AppendLine("default:");
+                        using (code.Indent())
+                        {
+                            code.AppendLine("throw new global::System.InvalidOperationException(\"Unexpected parse result.\");");
+                        }
                     }
-
-                    code.AppendLine("throw new global::System.InvalidOperationException(\"Unexpected parse result.\");");
                 }
 
                 code.AppendLine();
