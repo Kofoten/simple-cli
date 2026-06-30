@@ -29,11 +29,11 @@ catch (AggregateException ex)
 try
 {
     // Let's test the happy path with the greedy collection and both boolean flags
-    string[] simulatedArgs = ["math", "add", "10", "20", "-a", "5", "15", "--verbose", "--table", "-w", "rainy,sunny", "snowy", "--weather", "cloudy", "--indexed-cheese", "7=Herrgård|Sweden", "--frozen-cheese", "Brie|France"];
+    string[] simulatedArgs = ["math", "add", "10", "20", "-a", "5", "15", "--verbose", "--table", "-w", "rainy,sunny", "snowy", "--weather", "cloudy", "--indexed-cheese", "7=Herrgård|Sweden", "--frozen-cheese", "Brie|France", "-l", "55"];
 
     Console.WriteLine($"Simulating multi command app args: {string.Join(" ", simulatedArgs)}\n");
 
-    var router = new CliCommandRouter(ErrorHandler);
+    var router = new CliCommandRouter(ExceptionHandler);
     router.Map("math", sr =>
     {
         sr.MapAdditionCommand("add", new());
@@ -64,7 +64,7 @@ try
 
     var services = new ServiceCollection();
     services.AddSingleton(new object());
-    services.AddCliCommands(simulatedArgs, ErrorHandler, router =>
+    services.AddCliCommands(simulatedArgs, ExceptionHandler, router =>
     {
         router.MapAdditionCommand("add");
     });
@@ -86,15 +86,27 @@ catch (AggregateException ex)
     Console.ResetColor();
 }
 
-static int ErrorHandler(IEnumerable<string> errors, string helpText)
+static int ExceptionHandler(Exception exception, IServiceProvider? _)
 {
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine("Command failed with the following errors:");
-    foreach (var error in errors)
+    if (exception is CliParseException parseException)
     {
-        Console.WriteLine($"- {error}");
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("Command failed with the following errors:");
+        foreach (var error in parseException.Errors)
+        {
+            Console.WriteLine($"- {error}");
+        }
+        Console.ResetColor();
+        Console.WriteLine(parseException.HelpText);
+
+        return 1;
     }
+
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine("An unknown error occurred:");
+    Console.WriteLine(exception.Message);
     Console.ResetColor();
-    Console.WriteLine(helpText);
-    return 1;
+    Console.WriteLine(exception.StackTrace);
+
+    return 42;
 }

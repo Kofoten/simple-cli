@@ -51,5 +51,29 @@ namespace Kofoten.SimpleCli.Generator.Diagnostics
             category: "Kofoten.SimpleCli.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor UnsupportedCollectionType = new(
+            id: "SCLI007",
+            title: "Unsupported collection type",
+            messageFormat: "The type '{0}' of property '{1}' is not a supportd collection type. See https://github.com/Kofoten/simple-cli/blob/main/README.md#supported-property-types for more information.",
+            category: "Kofoten.SimpleCli.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor AmbiguousCliPropertyBinding = new(
+            id: "SCLI008",
+            title: "Ambiguous CLI property binding",
+            messageFormat: "Ambiguous CLI binding of property '{0}'. A CLI property may not be both an argument and an option.",
+            category: "Kofoten.SimpleCli.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor MissingParser = new(
+            id: "SCLI009",
+            title: "Missing parser",
+            messageFormat: "The type '{0}' of property '{1}' does not have any valid parser",
+            category: "Kofoten.SimpleCli.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
     }
 }

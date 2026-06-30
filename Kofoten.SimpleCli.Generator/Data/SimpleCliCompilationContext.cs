@@ -3,10 +3,12 @@ using System.Collections.Generic;
 
 namespace Kofoten.SimpleCli.Generator.Data;
 
-public record SimpleCliCompilationContext(
+internal record SimpleCliCompilationContext(
     INamedTypeSymbol? CliParsableSymbol,
     INamedTypeSymbol? CliArgumentAttributeSymbol,
     INamedTypeSymbol? CliOptionAttributeSymbol,
+    INamedTypeSymbol? CliParserAttributeSymbol,
+    INamedTypeSymbol? CliKeyParserAttributeSymbol,
     INamedTypeSymbol? FlagsAttributeSymbol,
     INamedTypeSymbol? EnumerableOfTSymbol,
     INamedTypeSymbol? KeyValuePairOfT2Symbol,

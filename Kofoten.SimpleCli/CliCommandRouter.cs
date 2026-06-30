@@ -1,12 +1,11 @@
 ﻿using System;
-using System.Collections.Generic;
 
 namespace Kofoten.SimpleCli;
 
-public sealed class CliCommandRouter(string commandDescription, Func<IEnumerable<string>, string, int> errorHandler) : CliCommandRouterBase<CliCommandRouter, Func<CliParseResult>>(commandDescription, errorHandler)
+public sealed class CliCommandRouter(string commandDescription, Func<Exception, IServiceProvider?, int> exceptionHandler) : CliCommandRouterBase<CliCommandRouter, Func<CliParseResult>>(commandDescription, exceptionHandler)
 {
-    public CliCommandRouter(Func<IEnumerable<string>, string, int> errorHandler)
-        : this(string.Empty, errorHandler)
+    public CliCommandRouter(Func<Exception, IServiceProvider?, int> exceptionHandler)
+        : this(string.Empty, exceptionHandler)
     {
     }
 
@@ -17,23 +16,11 @@ public sealed class CliCommandRouter(string commandDescription, Func<IEnumerable
     /// <param name="args">The arguments to resolve the command from.</param>
     /// <returns>The resolved command.</returns>
     public CliCommand GetCommand(string[] args)
-    {
-        var factoryResult = GetFactoryFunction(args);
-        switch (factoryResult)
-        {
-            case CliFactoryFunctionResult<Func<CliParseResult>>.Success success:
-                var parseResult = success.FactoryFunction.Invoke();
-                return ResolveParseResult(parseResult, success.HelpText);
-            case CliFactoryFunctionResult<Func<CliParseResult>>.Failure failure:
-                var exitCode = errorHandler.Invoke(failure.Errors, failure.HelpText);
-                return Exit(exitCode);
-            case CliFactoryFunctionResult<Func<CliParseResult>>.Usage usage:
-                Console.WriteLine(usage.HelpText);
-                return Exit(0);
-            default:
-                throw new ArgumentOutOfRangeException();
-        }
-    }
+        => CliCommand.CreateFromFactoryFunctionResult(
+            GetFactoryFunction(args),
+            (factoryFunction) => factoryFunction.Invoke(),
+            exceptionHandler,
+            null);
 
-    protected override CliCommandRouter CreateSubRouter(string description) => new(description, errorHandler);
+    protected override CliCommandRouter CreateSubRouter(string description) => new(description, exceptionHandler);
 }

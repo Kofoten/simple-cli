@@ -13,6 +13,8 @@ namespace Kofoten.SimpleCli.Generator;
 [Generator]
 public class CliParsersSourceGenerator : IIncrementalGenerator
 {
+    public const string DefaultParserMethodName = "TryParse";
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var classDeclarations = context.SyntaxProvider
@@ -83,6 +85,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 CliParsableSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.ICliParsable"),
                 CliArgumentAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliArgumentAttribute"),
                 CliOptionAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliOptionAttribute"),
+                CliParserAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliParserAttribute"),
+                CliKeyParserAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliKeyParserAttribute"),
                 FlagsAttributeSymbol: compilation.GetTypeByMetadataName("System.FlagsAttribute"),
                 EnumerableOfTSymbol: iEnumerableOfT,
                 KeyValuePairOfT2Symbol: compilation.GetTypeByMetadataName("System.Collections.Generic.KeyValuePair`2"),
@@ -190,6 +194,28 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             var optAttribute = member.GetAttributes().FirstOrDefault(a =>
                 SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliOptionAttributeSymbol));
 
+            if (argAttribute == null && optAttribute == null)
+            {
+                // NOTE: Property is not decorated as a CLI option or argument and should therfore be skipped.
+                continue;
+            }
+
+            if (argAttribute != null && optAttribute != null)
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    DiagnosticDescriptors.AmbiguousCliPropertyBinding,
+                    member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                    member.Name));
+
+                continue;
+            }
+
+            var parserAttribute = member.GetAttributes().FirstOrDefault(a =>
+                SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliParserAttributeSymbol));
+
+            var keyParserAttribute = member.GetAttributes().FirstOrDefault(a =>
+                SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliKeyParserAttributeSymbol));
+
             string typeName = member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             ITypeSymbol valueTypeSymbol = member.Type;
             ITypeSymbol? keyTypeSymbol = null;
@@ -209,7 +235,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
                         member.Name));
 
-                    return new CommandGenerationResult(null, diagnostics.ToImmutable());
+                    continue;
                 }
                 else if (TryGetKeyValueTypeArgs(elementType, simpleCliContext, out keyTypeSymbol, out var foundValueType))
                 {
@@ -220,7 +246,13 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
                     else
                     {
-                        // TODO: Diagnostig unsupported collection type.
+                        diagnostics.Add(Diagnostic.Create(
+                            DiagnosticDescriptors.UnsupportedCollectionType,
+                            member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                            typeName,
+                            member.Name));
+
+                        continue;
                     }
                 }
                 else
@@ -232,7 +264,13 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
                     else
                     {
-                        // TODO: Diagnostig unsupported collection type.
+                        diagnostics.Add(Diagnostic.Create(
+                            DiagnosticDescriptors.UnsupportedCollectionType,
+                            member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                            typeName,
+                            member.Name));
+
+                        continue;
                     }
                 }
             }
@@ -246,32 +284,74 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             bool valueHasErrorMessageOut = false;
             bool keyHasErrorMessageOut = false;
 
-            if (isEnum)
+            if (parserAttribute != null)
+            {
+                if (parserAttribute.ConstructorArguments.Length == 2
+                    &&
+                    parserAttribute.ConstructorArguments[0].Value is INamedTypeSymbol customParserTypeSymbol
+                    &&
+                    parserAttribute.ConstructorArguments[1].Value is string customParserMethodName)
+                {
+                    string customParserTypeName = customParserTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+                    (valueHasValidParser, valueHasErrorMessageOut) = InspectParserSignature(customParserTypeSymbol, customParserMethodName);
+                    valueParserMethodName = $"{customParserTypeName}.{customParserMethodName}";
+                }
+            }
+            else if (isEnum)
             {
                 valueHasValidParser = true;
                 isFlagsEnum = valueTypeSymbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.FlagsAttributeSymbol));
             }
             else if (!isString)
             {
-                string targetMethodName = "TryParse";
-                (valueHasValidParser, valueHasErrorMessageOut) = InspectParserSignature(valueTypeSymbol, targetMethodName);
-                valueParserMethodName = $"{valueTypeName}.{targetMethodName}";
+                (valueHasValidParser, valueHasErrorMessageOut) = InspectParserSignature(valueTypeSymbol, DefaultParserMethodName);
+                valueParserMethodName = $"{valueTypeName}.{DefaultParserMethodName}";
+            }
 
-                if (isDictionary)
+            if (!isEnum && !isString && isDictionary)
+            {
+                if (keyParserAttribute != null)
                 {
-                    (keyHasValidParser, keyHasErrorMessageOut) = InspectParserSignature(keyTypeSymbol!, targetMethodName);
-                    keyParserMethodName = $"{keyTypeName}.{targetMethodName}";
+                    if (keyParserAttribute.ConstructorArguments.Length == 2
+                        &&
+                        keyParserAttribute.ConstructorArguments[0].Value is INamedTypeSymbol customParserTypeSymbol
+                        &&
+                        keyParserAttribute.ConstructorArguments[1].Value is string customParserMethodName)
+                    {
+                        string customParserTypeName = customParserTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+                        (keyHasValidParser, keyHasErrorMessageOut) = InspectParserSignature(customParserTypeSymbol, customParserMethodName);
+                        keyParserMethodName = $"{customParserTypeName}.{customParserMethodName}";
+                    }
+                }
+                else
+                {
+                    (keyHasValidParser, keyHasErrorMessageOut) = InspectParserSignature(keyTypeSymbol!, DefaultParserMethodName);
+                    keyParserMethodName = $"{keyTypeName}.{DefaultParserMethodName}";
                 }
             }
 
             if (!valueHasValidParser)
             {
-                // TODO: Emit Diagnostic Error for DX: "Type {valueTypeSymbol.Name} does not have a valid parser."
+                diagnostics.Add(Diagnostic.Create(
+                    DiagnosticDescriptors.MissingParser,
+                    member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                    valueTypeName,
+                    member.Name));
+
+                continue;
             }
 
             if (!keyHasValidParser && isDictionary)
             {
-                // TODO: Emit Diagnostic Error for DX: "Type {keyTypeSymbol.Name} does not have a valid parser."
+                diagnostics.Add(Diagnostic.Create(
+                    DiagnosticDescriptors.MissingParser,
+                    member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                    keyTypeName,
+                    member.Name));
+
+                continue;
             }
 
             string? defaultValueString = null;

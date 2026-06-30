@@ -75,17 +75,29 @@ router.Map("math", sr =>
 
 return router.GetCommand(args).Execute();
 
-static int ErrorHandler(IEnumerable<string> errors, string helpText)
+static int ExceptionHandler(Exception exception, IServiceProvider? _)
 {
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine("Command failed with the following errors:");
-    foreach (var error in errors)
+    if (exception is CliParseException parseException)
     {
-        Console.WriteLine($"- {error}");
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("Command failed with the following errors:");
+        foreach (var error in parseException.Errors)
+        {
+            Console.WriteLine($"- {error}");
+        }
+        Console.ResetColor();
+        Console.WriteLine(parseException.HelpText);
+
+        return 1;
     }
+
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine("An unknown error occurred:");
+    Console.WriteLine(exception.Message);
     Console.ResetColor();
-    Console.WriteLine(helpText);
-    return 1;
+    Console.WriteLine(exception.StackTrace);
+
+    return 42;
 }
 ```
 
@@ -98,6 +110,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 return new ServiceCollection()
     .AddSingleton(new object())
+    .AddLogging(builder =>
+    {
+        builder.SetMinimumLevel(LogLevel.Information);
+    })
     .AddCliCommands(args, ErrorHandler, router =>
     {
         router.MapAdditionCommand("add");
@@ -106,17 +122,34 @@ return new ServiceCollection()
     .GetRequiredService<CliCommand>()
     .Execute();
 
-static int ErrorHandler(IEnumerable<string> errors, string helpText)
+static int ExceptionHandler(Exception exception, IServiceProvider? sp)
 {
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine("Command failed with the following errors:");
-    foreach (var error in errors)
+    var logger = sp?.GetService<ILogger<Program>>();
+
+    if (exception is CliParseException parseException)
     {
-        Console.WriteLine($"- {error}");
+        if (logger is not null)
+        {
+            logger.FailedToParseArguments(parseException.Message);
+        }
+        else
+        {
+            Console.WriteLine(parseException.Message);
+        }
+
+        return 1;
     }
-    Console.ResetColor();
-    Console.WriteLine(helpText);
-    return 1;
+
+    if (logger is not null)
+    {
+        logger.UnhandledException(exception);
+    }
+    else
+    {
+        Console.WriteLine(exception.ToString());
+    }
+
+    return 42;
 }
 ```
 
@@ -131,6 +164,40 @@ There are two possible signatures that can be used:
 - `public static bool TryParse(string s, out T value, out string error)`
 
 Implement the second version if you want to provide a specific error message to the user.
+
+#### Custom parsing
+
+If you are trying to parse external types that you can not simple add a `TryParse` method to you can use the `CliParserAttribute` to point the source generation to a specific method that should be used for parsing. These methods must have the same signature ase previously mentioned `TryParse` methods.
+
+⚠️ This is not applicable to multi value or key value pair options. Instead the specified parser will be applied to the elements and values of these types. To define a custom key parser, use the `CliKeyParserAttribute`. The only way to achive custom multi value parsing is to create a type that uses the standard `TryParse` method and it **MUST NOT** implement the `IEnumerable<T>` interface. and values can not be passed seperatley.
+
+Example:
+
+```c#
+public static class CustomCliParsers
+{
+    public static bool TryParseExtrenalType(string s, [NotNullWhen(true)] out ExternalType? v, [NotNullWhen(false)] out string? error)
+    {
+        var parts = s.Split('|');
+        if (parts.All(p => p.Length > 0 && char.IsUpper(p[0])))
+        {
+            error = null;
+            v = new ExternalType(parts);
+            return true;
+        }
+
+        error = $"All parts must start with an upper case character.";
+        v = null;
+        return false;
+    }
+}
+```
+
+```c#
+[CliOption("named-parts", Description = "Sets the parts to use for building something cool.")]
+[CliParser(typeof(CliParsers), nameof(CliParsers.TryParseExtrenalType))]
+public required ExternalType NamedParts { get; init; }
+```
 
 #### Enums
 
@@ -208,7 +275,22 @@ There are some limitations in what kind of cli that can be designed. Some limita
 
 ### Will change (probably)
 
-- No validation pipeline.
-- No custom parsers.
+- No validation pipeline (currently you can use custom parsers to hook into the parsing pipeline using the `CliParserAttribute` and the error message out signature for custom validation).
 - No hidden or global options.
 - No shell auto completions.
+
+## Analyzer diagnostic codes
+
+To ensure a smooth developer experience, `Kofoten.SimpleCli` includes a Roslyn analyzer that catches configuration errors at compile time.
+
+| Code | Title | Description | Severity |
+| :--- | :--- | :--- | :--- |
+| **SCLI001** | Invalid constructor count | The command class must declare exactly one public constructor to be CLI-parsable. | Error |
+| **SCLI002** | Unsupported collection type | A property is using a collection type whose element type could not be resolved by the generator. | Error |
+| **SCLI003** | Duplicate argument position | Multiple properties are marked with `[CliArgument]` using the same positional index. | Error |
+| **SCLI004** | Duplicate option name | Multiple properties are marked with `[CliOption]` using the same name. | Error |
+| **SCLI005** | Duplicate short option | Multiple properties are marked with `[CliOption]` using the same short character (e.g., `-a`). | Error |
+| **SCLI006** | Reserved option name | A property attempted to use `-h` or `--help`, which are strictly reserved by the CLI router for displaying help text. | Error |
+| **SCLI007** | Unsupported collection type | A property is using a collection type that is not supported by the generator. | Error |
+| **SCLI008** | Ambiguous CLI property binding | A property is marked with both `[CliArgument]` and `[CliOption]`, which is not allowed. | Error |
+| **SCLI009** | Missing parser | The type of a CLI property does not have a valid parser (e.g., no compatible `TryParse` method or `[CliParser]` attribute). | Error |

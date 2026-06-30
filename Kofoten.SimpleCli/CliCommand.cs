@@ -6,18 +6,17 @@ namespace Kofoten.SimpleCli;
 
 public sealed class CliCommand
 {
-    private readonly int exitCode;
     private readonly ICliParsable? command;
+    private readonly CliParseException? parseException;
+    private readonly Func<Exception, IServiceProvider?, int> exceptionHandler;
+    private readonly IServiceProvider? serviceProvider;
 
-    internal CliCommand(ICliParsable command)
+    private CliCommand(ICliParsable? command, CliParseException? parseException, Func<Exception, IServiceProvider?, int> exceptionHandler, IServiceProvider? serviceProvider)
     {
-        this.command = command ?? throw new ArgumentNullException(nameof(command));
-    }
-
-    internal CliCommand(int exitCode)
-    {
-        command = null;
-        this.exitCode = exitCode;
+        this.command = command;
+        this.parseException = parseException;
+        this.exceptionHandler = exceptionHandler;
+        this.serviceProvider = serviceProvider;
     }
 
     /// <summary>
@@ -27,13 +26,7 @@ public sealed class CliCommand
     /// </summary>
     /// <returns>The exit code of the command.</returns>
     /// <exception cref="InvalidOperationException">Thrown if the command type can not be invoked.</exception>
-    public int Execute() => command switch
-    {
-        ICliCommand cliCommand => cliCommand.Execute(),
-        IAsyncCliCommand asyncCliCommand => ConfigureCancellationAndExecuteAsyncCommand(asyncCliCommand).GetAwaiter().GetResult(),
-        null => exitCode,
-        _ => throw new InvalidOperationException($"Unsupported command type: {command.GetType().FullName}."),
-    };
+    public int Execute() => ExecuteAsync(true).GetAwaiter().GetResult();
 
     /// <summary>
     /// Executes the command asynchronously. Asynchronous commands will have  Ctrl + C detection is automatically configured
@@ -41,13 +34,7 @@ public sealed class CliCommand
     /// </summary>
     /// <returns>The exit code of the command.</returns>
     /// <exception cref="InvalidOperationException">Thrown if the command type can not be invoked.</exception>
-    public Task<int> ExecuteAsync() => command switch
-    {
-        ICliCommand cliCommand => Task.FromResult(cliCommand.Execute()),
-        IAsyncCliCommand asyncCliCommand => ConfigureCancellationAndExecuteAsyncCommand(asyncCliCommand),
-        null => Task.FromResult(exitCode),
-        _ => throw new InvalidOperationException($"Unsupported command type: {command.GetType().FullName}."),
-    };
+    public Task<int> ExecuteAsync() => ExecuteAsync(true);
 
     /// <summary>
     /// Executes the command asynchronously. This method can be used when you want to configure the
@@ -56,15 +43,9 @@ public sealed class CliCommand
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     /// <returns>The exit code of the command.</returns>
     /// <exception cref="InvalidOperationException">Thrown if the command type can not be invoked.</exception>
-    public Task<int> ExecuteAsync(CancellationToken cancellationToken) => command switch
-    {
-        ICliCommand cliCommand => Task.FromResult(cliCommand.Execute()),
-        IAsyncCliCommand asyncCliCommand => asyncCliCommand.ExecuteAsync(cancellationToken),
-        null => Task.FromResult(exitCode),
-        _ => throw new InvalidOperationException($"Unsupported command type: {command.GetType().FullName}."),
-    };
+    public Task<int> ExecuteAsync(CancellationToken cancellationToken) => ExecuteAsync(false, cancellationToken);
 
-    private async Task<int> ConfigureCancellationAndExecuteAsyncCommand(IAsyncCliCommand asyncCliCommand)
+    private async Task<int> ExecuteAsync(bool configureCancellartion, CancellationToken cancellationToken = default)
     {
         using var cts = new CancellationTokenSource();
         void handler(object _, ConsoleCancelEventArgs e)
@@ -74,13 +55,59 @@ public sealed class CliCommand
         }
 
         Console.CancelKeyPress += handler;
+
+        var ct = configureCancellartion ? cts.Token : cancellationToken;
         try
         {
-            return await asyncCliCommand.ExecuteAsync(cts.Token);
+            switch (command)
+            {
+                case ICliCommand cliCommand:
+                    return cliCommand.Execute();
+                case IAsyncCliCommand asyncCliCommand:
+                    return await asyncCliCommand.ExecuteAsync(ct);
+                case null:
+                    return parseException is null ? 0 : exceptionHandler.Invoke(parseException, serviceProvider);
+                default:
+                    return exceptionHandler.Invoke(new InvalidOperationException($"Unsupported command type: {command.GetType().FullName}."), serviceProvider);
+            }
+            ;
+        }
+        catch (Exception ex)
+        {
+            return exceptionHandler.Invoke(ex, serviceProvider);
         }
         finally
         {
-            Console.CancelKeyPress -= handler;
+            if (configureCancellartion)
+            {
+                Console.CancelKeyPress -= handler;
+            }
+        }
+    }
+
+    public static CliCommand CreateFromFactoryFunctionResult<TFactoryFunction>(
+        CliFactoryFunctionResult<TFactoryFunction> factoryFunctionResolutionResult,
+        Func<TFactoryFunction, CliParseResult> factoryInvoker,
+        Func<Exception, IServiceProvider?, int> exceptionHandler,
+        IServiceProvider? serviceProvider)
+    {
+        switch (factoryFunctionResolutionResult)
+        {
+            case CliFactoryFunctionResult<TFactoryFunction>.Success success:
+                var parseResult = factoryInvoker.Invoke(success.FactoryFunction);
+                return parseResult switch
+                {
+                    CliParseResult.Success parseSuccess => new(parseSuccess.Parsable, null, exceptionHandler, serviceProvider),
+                    CliParseResult.Failure parseFailure => new(null, new CliParseException(parseFailure.Errors, success.HelpText), exceptionHandler, serviceProvider),
+                    _ => throw new ArgumentOutOfRangeException()
+                };
+            case CliFactoryFunctionResult<TFactoryFunction>.Failure failure:
+                return new(null, new CliParseException(failure.Errors, failure.HelpText), exceptionHandler, serviceProvider);
+            case CliFactoryFunctionResult<TFactoryFunction>.Usage usage:
+                Console.WriteLine(usage.HelpText);
+                return new(null, null, exceptionHandler, serviceProvider);
+            default:
+                throw new ArgumentOutOfRangeException();
         }
     }
 }

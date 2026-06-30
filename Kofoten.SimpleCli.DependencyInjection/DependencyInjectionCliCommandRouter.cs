@@ -1,13 +1,12 @@
 ﻿using System;
-using System.Collections.Generic;
 
 namespace Kofoten.SimpleCli.DependencyInjection;
 
-public sealed class DependencyInjectionCliCommandRouter(string commandDescription, Func<IEnumerable<string>, string, int> errorHandler)
-    : CliCommandRouterBase<DependencyInjectionCliCommandRouter, Func<IServiceProvider, CliParseResult>>(commandDescription, errorHandler)
+public sealed class DependencyInjectionCliCommandRouter(string commandDescription, Func<Exception, IServiceProvider?, int> exceptionHandler)
+    : CliCommandRouterBase<DependencyInjectionCliCommandRouter, Func<IServiceProvider, CliParseResult>>(commandDescription, exceptionHandler)
 {
-    public DependencyInjectionCliCommandRouter(Func<IEnumerable<string>, string, int> errorHandler)
-        : this(string.Empty, errorHandler)
+    public DependencyInjectionCliCommandRouter(Func<Exception, IServiceProvider?, int> exceptionHandler)
+        : this(string.Empty, exceptionHandler)
     {
     }
 
@@ -19,23 +18,11 @@ public sealed class DependencyInjectionCliCommandRouter(string commandDescriptio
     /// <param name="serviceProvider">The service provider to resolve dependencies from.</param>
     /// <returns>The resolved command.</returns>
     public CliCommand GetCommand(string[] args, IServiceProvider serviceProvider)
-    {
-        var factoryResult = GetFactoryFunction(args);
-        switch (factoryResult)
-        {
-            case CliFactoryFunctionResult<Func<IServiceProvider, CliParseResult>>.Success success:
-                var parseResult = success.FactoryFunction.Invoke(serviceProvider);
-                return ResolveParseResult(parseResult, success.HelpText);
-            case CliFactoryFunctionResult<Func<IServiceProvider, CliParseResult>>.Failure failure:
-                var exitCode = errorHandler.Invoke(failure.Errors, failure.HelpText);
-                return Exit(exitCode);
-            case CliFactoryFunctionResult<Func<IServiceProvider, CliParseResult>>.Usage usage:
-                Console.WriteLine(usage.HelpText);
-                return Exit(0);
-            default:
-                throw new ArgumentOutOfRangeException();
-        }
-    }
+        => CliCommand.CreateFromFactoryFunctionResult(
+            GetFactoryFunction(args),
+            (factoryFunction) => factoryFunction.Invoke(serviceProvider),
+            exceptionHandler,
+            serviceProvider);
 
-    protected override DependencyInjectionCliCommandRouter CreateSubRouter(string description) => new(description, errorHandler);
+    protected override DependencyInjectionCliCommandRouter CreateSubRouter(string description) => new(description, exceptionHandler);
 }

@@ -29,6 +29,7 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
     public required Cheese Cheese { get; init; } = new Cheese("Västerbotten", "Sweden");
 
     [CliOption("limit", Short = 'l', Description = "Sets a limit")]
+    [CliParser(typeof(CliParsers), nameof(CliParsers.TryParseLimit))]
     public int Limit { get; init; } = 5;
 
     [CliOption("signature", Short = 's', Description = "A signature for the math")]

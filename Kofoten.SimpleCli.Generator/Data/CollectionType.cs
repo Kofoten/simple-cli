@@ -1,6 +1,6 @@
 ﻿namespace Kofoten.SimpleCli.Generator.Data;
 
-public enum CollectionType
+internal enum CollectionType
 {
     None = 0,
     Array,

@@ -5,18 +5,18 @@ using System.Text;
 
 namespace Kofoten.SimpleCli;
 
-public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string commandDescription, Func<IEnumerable<string>, string, int> errorHandler) : ICliCommandFactory<TFactoryFunction>
+public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string commandDescription, Func<Exception, IServiceProvider?, int> exceptionHandler) : ICliCommandFactory<TFactoryFunction>
     where TRouter : CliCommandRouterBase<TRouter, TFactoryFunction>, ICliCommandFactory<TFactoryFunction>
 {
     private readonly Dictionary<string, ICliCommandFactory<TFactoryFunction>> factories = [];
 
-    protected readonly Func<IEnumerable<string>, string, int> errorHandler = errorHandler;
+    protected readonly Func<Exception, IServiceProvider?, int> exceptionHandler = exceptionHandler;
 
     public bool IsLeaf => false;
     public string CommandDescription { get; private set; } = commandDescription;
 
-    public CliCommandRouterBase(Func<IEnumerable<string>, string, int> errorHandler)
-        : this(string.Empty, errorHandler)
+    public CliCommandRouterBase(Func<Exception, IServiceProvider?, int> exceptionHandler)
+        : this(string.Empty, exceptionHandler)
     {
     }
 
@@ -114,20 +114,4 @@ public abstract class CliCommandRouterBase<TRouter, TFactoryFunction>(string com
     {
         throw new NotImplementedException();
     }
-
-    protected CliCommand ResolveParseResult(CliParseResult parseResult, string helpText)
-    {
-        switch (parseResult)
-        {
-            case CliParseResult.Success parseSuccess:
-                return new CliCommand(parseSuccess.Parsable);
-            case CliParseResult.Failure parseFailure:
-                var exitCode = errorHandler.Invoke(parseFailure.Errors, helpText);
-                return Exit(exitCode);
-            default:
-                throw new ArgumentOutOfRangeException();
-        }
-    }
-
-    protected CliCommand Exit(int exitCode) => new(exitCode);
 }
