@@ -1,4 +1,6 @@
-﻿namespace Kofoten.SimpleCli.Test;
+﻿using System.Text.RegularExpressions;
+
+namespace Kofoten.SimpleCli.Test;
 
 public static class CliParsers
 {
@@ -18,5 +20,20 @@ public static class CliParsers
 
         error = $"The value {s} can not pe parsed to an integer.";
         return false;
+    }
+
+    public static bool TryParseSignature(string s, out string? signature, out string? error)
+    {
+        var regex = new Regex("^[A-Z][a-z]*$");
+        if (regex.IsMatch(s))
+        {
+            error = null;
+            signature = s;
+            return true;
+        }
+
+        error = $"Signature must contai9n only the characters a-z and be all lowercase except for the first wich must be an upper case character.";
+        signature = null;
+        return true;
     }
 }

@@ -303,7 +303,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 valueHasValidParser = true;
                 isFlagsEnum = valueTypeSymbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.FlagsAttributeSymbol));
             }
-            else if (!isString)
+            else if (valueTypeSymbol.SpecialType == SpecialType.System_String) // NOTE: valueTypeSymbol may have changed after first isString check.
+            {
+                valueHasValidParser = true;
+                valueHasErrorMessageOut = false;
+            }
+            else
             {
                 (valueHasValidParser, valueHasErrorMessageOut) = InspectParserSignature(valueTypeSymbol, DefaultParserMethodName);
                 valueParserMethodName = $"{valueTypeName}.{DefaultParserMethodName}";
@@ -324,6 +329,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         (keyHasValidParser, keyHasErrorMessageOut) = InspectParserSignature(customParserTypeSymbol, customParserMethodName);
                         keyParserMethodName = $"{customParserTypeName}.{customParserMethodName}";
                     }
+                }
+                else if (keyTypeSymbol!.SpecialType == SpecialType.System_String)
+                {
+                    keyHasValidParser = true;
+                    keyHasErrorMessageOut = false;
                 }
                 else
                 {

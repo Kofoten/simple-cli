@@ -33,6 +33,7 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
     public int Limit { get; init; } = 5;
 
     [CliOption("signature", Short = 's', Description = "A signature for the math")]
+    [CliParser(typeof(CliParsers), nameof(CliParsers.TryParseSignature))]
     public string Signature { get; init; } = "Kangaxx";
 
     [CliOption("weather", Short = 'w', Description = "Whats the weather")]

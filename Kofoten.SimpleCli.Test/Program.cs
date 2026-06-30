@@ -29,7 +29,7 @@ catch (AggregateException ex)
 try
 {
     // Let's test the happy path with the greedy collection and both boolean flags
-    string[] simulatedArgs = ["math", "add", "10", "20", "-a", "5", "15", "--verbose", "--table", "-w", "rainy,sunny", "snowy", "--weather", "cloudy", "--indexed-cheese", "7=Herrgård|Sweden", "--frozen-cheese", "Brie|France", "-l", "55"];
+    string[] simulatedArgs = ["math", "add", "10", "20", "-a", "5", "15", "--verbose", "--table", "-w", "rainy,sunny", "snowy", "--weather", "cloudy", "--indexed-cheese", "7=Herrgård|Sweden", "--frozen-cheese", "Brie|France", "-l", "55", "-s", "Kofoten"];
 
     Console.WriteLine($"Simulating multi command app args: {string.Join(" ", simulatedArgs)}\n");
 
