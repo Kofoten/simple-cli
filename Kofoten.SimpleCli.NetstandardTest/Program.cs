@@ -1,7 +1,6 @@
 ﻿using Kofoten.SimpleCli;
 using Kofoten.SimpleCli.NetstandardTest;
 using System;
-using System.Collections.Generic;
 
 public class Program
 {
@@ -64,16 +63,24 @@ public class Program
         return 0;
     }
 
-    static int ErrorHandler(IEnumerable<string> errors, string helpText)
+    static int ErrorHandler(Exception exception, IServiceProvider _)
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("Command failed with the following errors:");
-        foreach (var error in errors)
+        if (exception is CliParseException parseException)
         {
-            Console.WriteLine($"- {error}");
+            Console.WriteLine("Command failed with the following errors:");
+            foreach (var error in parseException.Errors)
+            {
+                Console.WriteLine($"- {error}");
+            }
+            Console.ResetColor();
+            Console.WriteLine(parseException.HelpText);
+            return 1;
         }
+
+        Console.WriteLine(exception.Message);
         Console.ResetColor();
-        Console.WriteLine(helpText);
-        return 1;
+        Console.WriteLine(exception.StackTrace);
+        return 42;
     }
 }
