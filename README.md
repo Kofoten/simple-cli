@@ -263,15 +263,16 @@ There are some limitations in what kind of cli that can be designed. Some limita
 - The options `-h` and `--help` are reserved to print help text.
 - No rich console UI (There are many other great libraries out there and i have no interest in developing such).
 - No configuration file or environment variable binding (use existing builtin features).
+- Use of `--` is required to begin parsing arguments **after** options have been passed and no more options may follow, evrything after `--` is treated as arguments.
 
 ### May change
 
-- Arguments must come before any options.
-- Arguments are currently restricted to single value types.
+- Arguments are restricted to single value types.
 - There is no detection for unknown options. Example: The only existing option is `--hello`, if the user writes `--x` nothing will happen and if the user writes `--hello --x` then `--x` will be passed as the value of `--hello`.
 - No support for `-` to indicate reading from stdin.
-- No support for `--` to indicate the end of options.
 - No middleware or interception pipeline.
+- No global options
+- No combined flags, you can not combine short names like `-v`, `-y`, `-k` to `-vyk`.
 
 ### Will change (probably)
 

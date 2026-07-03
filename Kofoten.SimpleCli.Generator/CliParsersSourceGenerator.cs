@@ -864,6 +864,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 var argumentNameLength = arguments.Max(a => a.Name.Length) + 4;
                 var optionNameLength = options.Max(o => o.OptionName.Length) + 4;
 
+                code.AppendLine($"private const global::System.Int32 RequiredArgumentCount = {arguments.Count(a => a.IsRequired)};");
+                code.AppendLine();
                 code.AppendLine("private const global::System.String HelpArgumentAndOptions = @\"");
                 if (arguments.Count != 0)
                 {
@@ -962,29 +964,6 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     foreach (var arg in arguments)
                     {
                         code.AppendLine($"{arg.TypeName} arg_{arg.Name} = default;");
-                        code.AppendLine($"if (args.Count > {arg.Position})");
-                        using (code.StartBlock())
-                        {
-                            if (arg.SpecialType == SpecialType.System_String)
-                            {
-                                code.AppendLine($"arg_{arg.Name} = args.Array[args.Offset + {arg.Position}];");
-                            }
-                            else
-                            {
-                                TryParseParserGenerator(code, arg);
-                            }
-                        }
-
-                        if (arg.IsRequired)
-                        {
-                            code.AppendLine("else");
-                            using (code.StartBlock())
-                            {
-                                code.AppendLine($"errors.Add(\"Missing required argument {arg.Name}\");");
-                            }
-                        }
-
-                        code.AppendLine();
                     }
 
                     foreach (var opt in options)
@@ -1012,93 +991,146 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
 
                     code.AppendLine();
-                    code.AppendLine("int state = 0;");
-                    code.AppendLine($"for (int i = {arguments.Count}; i < args.Count; i++)");
+                    code.AppendLine("int segmentEnd = args.Offset + args.Count;");
+                    code.AppendLine("int state = -1;");
+                    code.AppendLine("int argIndex = 0;");
+                    code.AppendLine("for (int i = args.Offset; i < segmentEnd; i++)");
                     using (code.StartBlock())
                     {
-                        code.AppendLine("switch (args.Array[args.Offset + i])");
+                        code.AppendLine("if (state > -2)");
                         using (code.StartBlock())
                         {
-                            for (int i = 0; i < options.Count; i++)
+                            code.AppendLine("switch (args.Array[i])");
+                            using (code.StartBlock())
                             {
-                                var opt = options[i];
-                                int stateId = i + 1;
-
-                                if (!string.IsNullOrEmpty(opt.OptionName))
-                                {
-                                    code.AppendLine($"case \"--{opt.OptionName}\":");
-                                }
-
-                                if (opt.ShortName.HasValue)
-                                {
-                                    code.AppendLine($"case \"-{opt.ShortName}\":");
-                                }
-
+                                code.AppendLine("case \"--\":");
                                 using (code.Indent())
                                 {
-                                    code.AppendLine($"state = {stateId};");
-                                    if (opt.TypeName == "bool")
-                                    {
-                                        code.AppendLine($"opt_{opt.Name} = true;");
-                                    }
-                                    code.AppendLine("continue;");
+                                    code.AppendLine("state = -2;");
+                                    code.AppendLine("break;");
                                 }
-                            }
 
+                                for (int i = 0; i < options.Count; i++)
+                                {
+                                    var opt = options[i];
 
-                            code.AppendLine("default:");
-                            using (code.Indent())
-                            {
-                                code.AppendLine("break;");
-                            }
-                        }
+                                    if (!string.IsNullOrEmpty(opt.OptionName))
+                                    {
+                                        code.AppendLine($"case \"--{opt.OptionName}\":");
+                                    }
 
-                        code.AppendLine();
-                        code.AppendLine("switch (state)");
-                        using (code.StartBlock())
-                        {
-                            for (int i = 0; i < options.Count; i++)
-                            {
-                                var opt = options[i];
-                                int stateId = i + 1;
+                                    if (opt.ShortName.HasValue)
+                                    {
+                                        code.AppendLine($"case \"-{opt.ShortName}\":");
+                                    }
 
-                                code.AppendLine($"case {stateId}:");
+                                    using (code.Indent())
+                                    {
+                                        code.AppendLine($"state = {i + 1};");
+                                        if (opt.TypeName == "bool")
+                                        {
+                                            code.AppendLine($"opt_{opt.Name} = true;");
+                                        }
+                                        code.AppendLine("continue;");
+                                    }
+                                }
+
+                                code.AppendLine("default:");
                                 using (code.Indent())
                                 {
-                                    if (opt.SpecialType == SpecialType.System_String)
+                                    code.AppendLine("if (state == 0)");
+                                    using (code.StartBlock())
                                     {
-                                        if (opt.IsCollection)
-                                        {
-                                            code.AppendLine($"opt_{opt.Name}.Add(args.Array[args.Offset + i]);");
-                                        }
-                                        else
-                                        {
-                                            code.AppendLine($"opt_{opt.Name} = args.Array[args.Offset + i];");
-                                        }
+                                        code.AppendLine("errors.Add($\"Unknown option {args.Array[i]}\");");
                                     }
-                                    else
-                                    {
-                                        using (code.StartBlock())
-                                        {
-                                            TryParseParserGenerator(code, opt);
-                                        }
-                                    }
-
-                                    if (!opt.IsCollection && !opt.IsFlagsEnum)
-                                    {
-                                        code.AppendLine("state = 0;");
-                                    }
-
                                     code.AppendLine("break;");
                                 }
                             }
 
-                            code.AppendLine("default:");
-                            using (code.Indent())
+                            code.AppendLine();
+                            code.AppendLine("switch (state)");
+                            using (code.StartBlock())
                             {
-                                code.AppendLine("break;");
+                                for (int i = 0; i < options.Count; i++)
+                                {
+                                    var opt = options[i];
+                                    int stateId = i + 1;
+
+                                    code.AppendLine($"case {stateId}:");
+                                    using (code.Indent())
+                                    {
+                                        if (opt.SpecialType == SpecialType.System_String)
+                                        {
+                                            if (opt.IsCollection)
+                                            {
+                                                code.AppendLine($"opt_{opt.Name}.Add(args.Array[i]);");
+                                            }
+                                            else
+                                            {
+                                                code.AppendLine($"opt_{opt.Name} = args.Array[i];");
+                                            }
+                                        }
+                                        else
+                                        {
+                                            using (code.StartBlock())
+                                            {
+                                                TryParseParserGenerator(code, opt);
+                                            }
+                                        }
+
+                                        if (!opt.IsCollection && !opt.IsFlagsEnum)
+                                        {
+                                            code.AppendLine("state = 0;");
+                                        }
+
+                                        code.AppendLine("break;");
+                                    }
+                                }
+
+                                code.AppendLine("default:");
+                                using (code.Indent())
+                                {
+                                    code.AppendLine("break;");
+                                }
                             }
                         }
+
+                        code.AppendLine();
+                        code.AppendLine("if (state < 0)");
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine("switch (argIndex)");
+                            using (code.StartBlock())
+                            {
+                                for (int i = 0; i < arguments.Count; i++)
+                                {
+                                    var arg = arguments[i];
+
+                                    code.AppendLine($"case {i}:");
+                                    using (code.Indent())
+                                    {
+                                        if (arg.SpecialType == SpecialType.System_String)
+                                        {
+                                            code.AppendLine($"arg_{arg.Name} = args.Array[i];");
+                                        }
+                                        else
+                                        {
+                                            TryParseParserGenerator(code, arg);
+                                        }
+                                        code.AppendLine("break;");
+                                    }
+                                }
+                            }
+
+                            code.AppendLine();
+                            code.AppendLine("argIndex++;");
+                        }
+                    }
+
+                    code.AppendLine("if (argIndex < RequiredArgumentCount)");
+                    using (code.StartBlock())
+                    {
+                        code.AppendLine("errors.Add($\"Too few arguments: At least {RequiredArgumentCount} argumeny(s) are required\");");
                     }
 
                     code.AppendLine();
@@ -1406,7 +1438,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             case ArgumentPropertyModel argModel:
                 if (argModel.IsEnum)
                 {
-                    code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>(args.Array[args.Offset + {argModel.Position}], true, out arg_{argModel.Name}))", applyIndent: true);
+                    code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>(args.Array[i], true, out arg_{argModel.Name}))", applyIndent: true);
                     using (code.StartBlock())
                     {
                         code.AppendLine($"errors.Add(\"Argument {argModel.Name} can not be parsed to type: {argModel.ValueTypeName}\");");
@@ -1414,7 +1446,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
                 else
                 {
-                    code.Append($"if (!{argModel.ValueParseMethodName}(args.Array[args.Offset + {argModel.Position}], out arg_{argModel.Name}", applyIndent: true);
+                    code.Append($"if (!{argModel.ValueParseMethodName}(args.Array[i], out arg_{argModel.Name}", applyIndent: true);
                     if (argModel.ValueHasErrorMessageOut)
                     {
                         code.AppendLine(", out global::System.String customError))", applyIndent: false);
@@ -1438,23 +1470,23 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
                 if (optModel.IsEnum)
                 {
-                    code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(args.Array[args.Offset + i], true, out {optModel.ValueTypeName} v))");
+                    code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(args.Array[i], true, out {optModel.ValueTypeName} v))");
                 }
                 else
                 {
-                    var valueAccessor = "args.Array[args.Offset + i]";
+                    var valueAccessor = "args.Array[i]";
 
                     if (optModel.IsDictionary)
                     {
                         valueAccessor = "valuePart";
 
-                        code.AppendLine("global::System.String currentArg = args.Array[args.Offset + i];");
+                        code.AppendLine("global::System.String currentArg = args.Array[i];");
                         code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
                         code.AppendLine();
                         code.AppendLine("if (delimiterIndex == -1)");
                         using (code.StartBlock())
                         {
-                            code.AppendLine($"errors.Add($\"Invalid format ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}. A key value pair must be delimitered using the equals sign.\");");
+                            code.AppendLine($"errors.Add($\"Invalid format ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}. A key value pair must be delimitered using the equals sign.\");");
                         }
                         code.AppendLine("else");
                         dictionaryBlock = code.StartBlock();
@@ -1479,7 +1511,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             }
                             else
                             {
-                                code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                                code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
                             }
                             code.AppendLine("isValidKVP = false;");
                         }
@@ -1515,7 +1547,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             }
                             else
                             {
-                                code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                                code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
                             }
                             code.AppendLine("isValidKVP = false;");
                         }
@@ -1556,7 +1588,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         }
                         else
                         {
-                            code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[args.Offset + i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                            code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
                         }
                     }
                 }
