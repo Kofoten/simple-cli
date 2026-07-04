@@ -25,7 +25,7 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
     [CliOption("version", Short = 'v', Description = "Displays the version of the command")]
     public bool Version { get; init; } = false;
 
-    [CliOption("cheese", Description = "Eats the specified cheese")]
+    [CliOption("cheese", Description = "Eats the specified cheese", Hidden = true)]
     public required Cheese Cheese { get; init; } = new Cheese("Västerbotten", "Sweden");
 
     [CliOption("limit", Short = 'l', Description = "Sets a limit")]

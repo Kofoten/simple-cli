@@ -21,7 +21,8 @@ internal record OptionPropertyModel(
     bool KeyHasErrorMessageOut,
     string? DefaultValueString,
     string OptionName,
-    char? ShortName
+    char? ShortName,
+    bool Hidden
 ) : PropertyModel(
     Name,
     TypeName,

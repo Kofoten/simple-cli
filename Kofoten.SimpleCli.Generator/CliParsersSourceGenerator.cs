@@ -425,8 +425,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         "-h"));
                 }
 
-                var descriptionArg = optAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Description");
+                var descriptionArg = optAttribute.NamedArguments.FirstOrDefault(x => x.Key == "Description");
                 var description = descriptionArg.Value.Value is string d ? d : string.Empty;
+
+                var hiddenArg = optAttribute.NamedArguments.FirstOrDefault(x => x.Key == "Hidden");
+                var hidden = hiddenArg.Value.Value is bool h ? h : false;
 
                 properties.Add(new OptionPropertyModel(
                     Name: member.Name,
@@ -447,7 +450,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     CollectionType: collectionType,
                     IsDictionary: isDictionary,
                     IsEnum: isEnum,
-                    IsFlagsEnum: isFlagsEnum));
+                    IsFlagsEnum: isFlagsEnum,
+                    Hidden: hidden));
             }
         }
 
@@ -882,6 +886,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 code.AppendLine("Options:", applyIndent: false);
                 foreach (var option in options)
                 {
+                    if (option.Hidden)
+                    {
+                        continue;
+                    }
+
                     if (option.ShortName is null)
                     {
                         code.Append("      ");

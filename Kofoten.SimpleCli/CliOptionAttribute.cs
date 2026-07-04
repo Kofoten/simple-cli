@@ -24,4 +24,9 @@ public sealed class CliOptionAttribute(string name) : Attribute
     /// The description of the option (used in help text).
     /// </summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Indicates if this option should be hidden from the help page.
+    /// </summary>
+    public bool Hidden { get; set; }
 }

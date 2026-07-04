@@ -277,7 +277,6 @@ There are some limitations in what kind of cli that can be designed. Some limita
 ### Will change (probably)
 
 - No validation pipeline (currently you can use custom parsers to hook into the parsing pipeline using the `CliParserAttribute` and the error message out signature for custom validation).
-- No hidden or global options.
 - No shell auto completions.
 
 ## Analyzer diagnostic codes
