@@ -33,13 +33,15 @@ try
 
     Console.WriteLine($"Simulating multi command app args: {string.Join(" ", simulatedArgs)}\n");
 
-    var router = new CliCommandRouter(ExceptionHandler);
-    router.Map("math", sr =>
+    var builder = CliCommandBuilder.Configure(router =>
     {
-        sr.MapAdditionCommand("add", new());
-    });
+        router.Map("math", sr =>
+        {
+            sr.MapAdditionCommand("add", new());
+        });
+    }, ExceptionHandler);
 
-    var command = router.GetCommand(simulatedArgs);
+    var command = builder.ToCommand(simulatedArgs);
 
     // Execute your handcrafted logic!
     command.Execute();
@@ -64,10 +66,10 @@ try
 
     var services = new ServiceCollection();
     services.AddSingleton(new object());
-    services.AddCliCommands(simulatedArgs, ExceptionHandler, router =>
+    services.AddCliCommands(simulatedArgs, router =>
     {
         router.MapAdditionCommand("add");
-    });
+    }, ExceptionHandler);
 
     var provider = services.BuildServiceProvider();
     var command = provider.GetRequiredService<CliCommand>();

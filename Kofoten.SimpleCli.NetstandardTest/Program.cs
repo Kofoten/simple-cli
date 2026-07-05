@@ -38,13 +38,15 @@ public class Program
 
             Console.WriteLine($"Simulating multi command app args: {string.Join(" ", simulatedArgs)}\n");
 
-            var router = new CliCommandRouter(ErrorHandler);
-            router.Map("math", sr =>
+            var builder = CliCommandBuilder.Configure(router =>
             {
-                sr.MapAdditionCommand("add", imaginaryService);
-            });
+                router.Map("math", sr =>
+                {
+                    sr.MapAdditionCommand("add", imaginaryService);
+                });
+            }, ExceptionHandler);
 
-            var command = router.GetCommand(simulatedArgs);
+            var command = builder.ToCommand(simulatedArgs);
 
             // Execute your handcrafted logic!
             command.Execute();
@@ -63,7 +65,7 @@ public class Program
         return 0;
     }
 
-    static int ErrorHandler(Exception exception, IServiceProvider _)
+    static int ExceptionHandler(Exception exception, IServiceProvider _)
     {
         Console.ForegroundColor = ConsoleColor.Red;
         if (exception is CliParseException parseException)

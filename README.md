@@ -67,13 +67,15 @@ Program.cs (with subcommand routing)
 ```c#
 using Kofoten.SimpleCli;
 
-var router = new CliCommandRouter(ErrorHandler);
-router.Map("math", sr =>
+var builder = CliCommandBuilder.Configure(router =>
 {
-    sr.MapAdditionCommand("add", new());
-});
+    router.Map("math", sr =>
+    {
+        sr.MapAdditionCommand("add", new());
+    });
+}, ExceptionHandler);
 
-return router.GetCommand(args).Execute();
+return builder.ToCommand(args).Execute();
 
 static int ExceptionHandler(Exception exception, IServiceProvider? _)
 {
@@ -114,10 +116,10 @@ return new ServiceCollection()
     {
         builder.SetMinimumLevel(LogLevel.Information);
     })
-    .AddCliCommands(args, ErrorHandler, router =>
+    .AddCliCommands(args, router =>
     {
         router.MapAdditionCommand("add");
-    })
+    }, ExceptionHandler)
     .BuildServiceProvider()
     .GetRequiredService<CliCommand>()
     .Execute();

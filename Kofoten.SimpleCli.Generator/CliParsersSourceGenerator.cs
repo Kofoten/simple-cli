@@ -24,13 +24,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
         var simpleCliCompilationContextProvider = context.CompilationProvider.Select(static (compilation, _) =>
         {
-            var diRouterSymbol = compilation.GetTypeByMetadataName("Kofoten.SimpleCli.DependencyInjection.DependencyInjectionCliCommandRouter");
             var serviceProviderSymbol = compilation.GetTypeByMetadataName("System.IServiceProvider");
             var getRequiredServiceExtensionsSymbol = compilation.GetTypeByMetadataName("Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions");
 
             var hasDependencyInjection =
-                diRouterSymbol is not null
-                &&
                 serviceProviderSymbol is not null
                 &&
                 getRequiredServiceExtensionsSymbol is not null;
@@ -1290,7 +1287,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
 
                 code.AppendLine();
-                code.Append($"public static void Map{command.ClassName}(this global::Kofoten.SimpleCli.CliCommandRouter router, global::System.String verb", applyIndent: true);
+                code.Append($"public static void Map{command.ClassName}(this global::Kofoten.SimpleCli.CliCommandRouter<global::System.Func<global::Kofoten.SimpleCli.CliParseResult>> router, global::System.String verb", applyIndent: true);
 
                 foreach (var ctorParam in command.ConstructorParameters)
                 {
@@ -1379,7 +1376,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 if (command.HasDependencyInjection)
                 {
                     code.AppendLine();
-                    code.AppendLine($"public static void Map{command.ClassName}(this global::Kofoten.SimpleCli.DependencyInjection.DependencyInjectionCliCommandRouter router, global::System.String verb)");
+                    code.AppendLine($"public static void Map{command.ClassName}(this global::Kofoten.SimpleCli.CliCommandRouter<global::System.Func<global::System.IServiceProvider, global::Kofoten.SimpleCli.CliParseResult>> router, global::System.String verb)");
                     using (code.StartBlock())
                     {
                         code.AppendLine("if (router is null)");
