@@ -35,7 +35,7 @@ internal class AdditionCommand(object imaginaryService) : BaseCommand
 
     [CliOption("signature", Short = 's', Description = "A signature for the math")]
     [CliParser(typeof(CliParsers), nameof(CliParsers.TryParseSignature))]
-    public string Signature { get; init; } = "Kangaxx";
+    public required string Signature { get; init; }
 
     [CliOption("indexed-cheese")]
     public CheeseLookup IndexedCheeses { get; init; } = [];
@@ -45,6 +45,9 @@ internal class AdditionCommand(object imaginaryService) : BaseCommand
 
     [CliOption("header")]
     public FrozenDictionary<string, string> Header { get; init; } = new Dictionary<string, string>() { { "type", "human" }, { "role", "king" } }.ToFrozenDictionary();
+
+    [CliOption("greetings")]
+    public IEnumerable<string> Greetings { get; init; } = [];
 
     public override int Execute()
     {

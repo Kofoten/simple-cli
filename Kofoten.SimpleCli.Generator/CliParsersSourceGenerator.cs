@@ -1363,26 +1363,9 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                     code.AppendLine($"case {stateId}:");
                                     using (code.Indent())
                                     {
-                                        if (opt.SpecialType == SpecialType.System_String)
-                                        {
-                                            if (opt.IsCollection)
-                                            {
-                                                code.AppendLine($"opt_{opt.Name}.Add(args.Array[i]);");
-                                            }
-                                            else
-                                            {
-                                                code.AppendLine($"opt_{opt.Name} = args.Array[i];");
-                                            }
-                                        }
-                                        else
-                                        {
-                                            using (code.StartBlock())
-                                            {
-                                                TryParseParserGenerator(code, opt);
-                                            }
-                                        }
+                                        GenerateParser(code, opt);
 
-                                        if (!opt.IsCollection && !opt.IsFlagsEnum)
+                                        if (!opt.IsCollection && !opt.IsDictionary && !opt.IsFlagsEnum)
                                         {
                                             code.AppendLine("state = 0;");
                                         }
@@ -1413,14 +1396,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                     code.AppendLine($"case {i}:");
                                     using (code.Indent())
                                     {
-                                        if (arg.SpecialType == SpecialType.System_String)
-                                        {
-                                            code.AppendLine($"arg_{arg.Name} = args.Array[i];");
-                                        }
-                                        else
-                                        {
-                                            TryParseParserGenerator(code, arg);
-                                        }
+                                        GenerateParser(code, arg);
                                         code.AppendLine("break;");
                                     }
                                 }
@@ -1762,12 +1738,17 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         context.AddSource($"{command.ClassName}Parser.g.cs", code.ToString());
     }
 
-    private static void TryParseParserGenerator(CodeBuilder code, PropertyModel model)
+    private static void GenerateParser(CodeBuilder code, PropertyModel model)
     {
         switch (model)
         {
             case ArgumentPropertyModel argModel:
-                if (argModel.IsEnum)
+                if (argModel.SpecialType == SpecialType.System_String)
+                {
+                    code.AppendLine($"arg_{argModel.Name} = args.Array[i];");
+                    break;
+                }
+                else if (argModel.IsEnum)
                 {
                     code.AppendLine($"if (!global::System.Enum.TryParse<{argModel.ValueTypeName}>(args.Array[i], true, out arg_{argModel.Name}))", applyIndent: true);
                     using (code.StartBlock())
@@ -1797,146 +1778,160 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
                 break;
             case OptionPropertyModel optModel:
-                IDisposable? dictionaryBlock = null;
-
-                if (optModel.IsEnum)
+                if (optModel.SpecialType == SpecialType.System_String)
                 {
-                    code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(args.Array[i], true, out {optModel.ValueTypeName} v))");
+                    code.AppendLine($"opt_{optModel.Name} = args.Array[i];");
+                    break;
                 }
-                else
+
+                if (optModel.ValueSpecialType == SpecialType.System_String && optModel.IsCollection)
                 {
-                    if (optModel.IsDictionary)
+                    code.AppendLine($"opt_{optModel.Name}.Add(args.Array[i]);");
+                    break;
+                }
+
+                using (code.StartBlock())
+                {
+                    IDisposable? dictionaryBlock = null;
+                    if (optModel.IsEnum)
                     {
-                        code.AppendLine("global::System.String currentArg = args.Array[i];");
-                        code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
-                        code.AppendLine();
-                        code.AppendLine("if (delimiterIndex == -1)");
-                        using (code.StartBlock())
+                        code.AppendLine($"if (global::System.Enum.TryParse<{optModel.ValueTypeName}>(args.Array[i], true, out {optModel.ValueTypeName} v))");
+                    }
+                    else
+                    {
+                        if (optModel.IsDictionary)
                         {
-                            code.AppendLine($"errors.Add($\"Invalid format ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}. A key value pair must be delimitered using the equals sign.\");");
+                            code.AppendLine("global::System.String currentArg = args.Array[i];");
+                            code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
+                            code.AppendLine();
+                            code.AppendLine("if (delimiterIndex == -1)");
+                            using (code.StartBlock())
+                            {
+                                code.AppendLine($"errors.Add($\"Invalid format ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}. A key value pair must be delimitered using the equals sign.\");");
+                            }
+                            code.AppendLine("else");
+                            dictionaryBlock = code.StartBlock();
+
+                            code.AppendLine("global::System.String keyPart = currentArg.Substring(0, delimiterIndex);");
+                            code.AppendLine("global::System.String valuePart = currentArg.Substring(delimiterIndex + 1);");
+                            code.AppendLine("global::System.Boolean isValidKVP = true;");
+                            code.AppendLine();
+
+                            if (optModel.KeySpecialType != SpecialType.System_String)
+                            {
+                                code.Append($"if (!{optModel.KeyParseMethodName}(keyPart, out {optModel.KeyTypeName} k", applyIndent: true);
+
+                                if (optModel.KeyHasErrorMessageOut)
+                                {
+                                    code.Append(", out global::System.String customError");
+                                }
+
+                                code.AppendLine("))", applyIndent: false);
+                                using (code.StartBlock())
+                                {
+                                    if (optModel.KeyHasErrorMessageOut)
+                                    {
+                                        code.AppendLine($"errors.Add($\"Failed to parse key for option '--{optModel.OptionName}': {{customError}}\");");
+                                    }
+                                    else
+                                    {
+                                        code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                                    }
+                                    code.AppendLine("isValidKVP = false;");
+                                }
+
+                                code.AppendLine();
+                            }
+
+                            if (optModel.ValueSpecialType != SpecialType.System_String)
+                            {
+                                code.Append($"if (!{optModel.ValueParseMethodName}(valuePart, out {optModel.ValueTypeName} v", applyIndent: true);
+
+                                if (optModel.ValueHasErrorMessageOut)
+                                {
+                                    if (optModel.KeyHasErrorMessageOut && optModel.KeySpecialType != SpecialType.System_String)
+                                    {
+                                        code.Append(", out customError");
+                                    }
+                                    else
+                                    {
+                                        code.Append(", out global::System.String customError");
+                                    }
+                                }
+
+                                code.AppendLine("))", applyIndent: false);
+                                using (code.StartBlock())
+                                {
+                                    if (optModel.ValueHasErrorMessageOut)
+                                    {
+                                        code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
+                                    }
+                                    else
+                                    {
+                                        code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                                    }
+                                    code.AppendLine("isValidKVP = false;");
+                                }
+
+                                code.AppendLine();
+                            }
+
+                            code.AppendLine("if (isValidKVP)");
                         }
-                        code.AppendLine("else");
-                        dictionaryBlock = code.StartBlock();
-
-                        code.AppendLine("global::System.String keyPart = currentArg.Substring(0, delimiterIndex);");
-                        code.AppendLine("global::System.String valuePart = currentArg.Substring(delimiterIndex + 1);");
-                        code.AppendLine("global::System.Boolean isValidKVP = true;");
-                        code.AppendLine();
-
-                        if (optModel.KeySpecialType != SpecialType.System_String)
+                        else
                         {
-                            code.Append($"if (!{optModel.KeyParseMethodName}(keyPart, out {optModel.KeyTypeName} k", applyIndent: true);
+                            code.Append($"if ({optModel.ValueParseMethodName}(args.Array[i], out {optModel.ValueTypeName} v", applyIndent: true);
 
-                            if (optModel.KeyHasErrorMessageOut)
+                            if (optModel.ValueHasErrorMessageOut)
                             {
                                 code.Append(", out global::System.String customError");
                             }
 
                             code.AppendLine("))", applyIndent: false);
-                            using (code.StartBlock())
-                            {
-                                if (optModel.KeyHasErrorMessageOut)
-                                {
-                                    code.AppendLine($"errors.Add($\"Failed to parse key for option '--{optModel.OptionName}': {{customError}}\");");
-                                }
-                                else
-                                {
-                                    code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
-                                }
-                                code.AppendLine("isValidKVP = false;");
-                            }
-
-                            code.AppendLine();
                         }
-
-                        if (optModel.ValueSpecialType != SpecialType.System_String)
-                        {
-                            code.Append($"if (!{optModel.ValueParseMethodName}(valuePart, out {optModel.ValueTypeName} v", applyIndent: true);
-
-                            if (optModel.ValueHasErrorMessageOut)
-                            {
-                                if (optModel.KeyHasErrorMessageOut && optModel.KeySpecialType != SpecialType.System_String)
-                                {
-                                    code.Append(", out customError");
-                                }
-                                else
-                                {
-                                    code.Append(", out global::System.String customError");
-                                }
-                            }
-
-                            code.AppendLine("))", applyIndent: false);
-                            using (code.StartBlock())
-                            {
-                                if (optModel.ValueHasErrorMessageOut)
-                                {
-                                    code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
-                                }
-                                else
-                                {
-                                    code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
-                                }
-                                code.AppendLine("isValidKVP = false;");
-                            }
-
-                            code.AppendLine();
-                        }
-
-                        code.AppendLine("if (isValidKVP)");
                     }
-                    else
-                    {
-                        code.Append($"if ({optModel.ValueParseMethodName}(args.Array[i], out {optModel.ValueTypeName} v", applyIndent: true);
 
-                        if (optModel.ValueHasErrorMessageOut)
-                        {
-                            code.Append(", out global::System.String customError");
-                        }
-
-                        code.AppendLine("))", applyIndent: false);
-                    }
-                }
-
-                using (code.StartBlock())
-                {
-                    if (model.IsFlagsEnum)
-                    {
-                        code.AppendLine($"opt_{optModel.Name} |= v;");
-                    }
-                    else if (model.IsDictionary)
-                    {
-                        var keyName = optModel.KeySpecialType == SpecialType.System_String ? "keyPart" : "k";
-                        var valueName = optModel.ValueSpecialType == SpecialType.System_String ? "valuePart" : "v";
-
-                        code.AppendLine($"opt_{optModel.Name}.Add(new global::System.Collections.Generic.KeyValuePair<{optModel.KeyTypeName}, {optModel.ValueTypeName}>({keyName}, {valueName}));");
-                    }
-                    else if (model.IsCollection)
-                    {
-                        code.AppendLine($"opt_{optModel.Name}.Add(v);");
-                    }
-                    else
-                    {
-                        code.AppendLine($"opt_{optModel.Name} = v;");
-                    }
-                }
-
-                if (!optModel.IsDictionary)
-                {
-                    code.AppendLine("else");
                     using (code.StartBlock())
                     {
-                        if (optModel.ValueHasErrorMessageOut)
+                        if (model.IsFlagsEnum)
                         {
-                            code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
+                            code.AppendLine($"opt_{optModel.Name} |= v;");
+                        }
+                        else if (model.IsDictionary)
+                        {
+                            var keyName = optModel.KeySpecialType == SpecialType.System_String ? "keyPart" : "k";
+                            var valueName = optModel.ValueSpecialType == SpecialType.System_String ? "valuePart" : "v";
+
+                            code.AppendLine($"opt_{optModel.Name}.Add(new global::System.Collections.Generic.KeyValuePair<{optModel.KeyTypeName}, {optModel.ValueTypeName}>({keyName}, {valueName}));");
+                        }
+                        else if (model.IsCollection)
+                        {
+                            code.AppendLine($"opt_{optModel.Name}.Add(v);");
                         }
                         else
                         {
-                            code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                            code.AppendLine($"opt_{optModel.Name} = v;");
                         }
                     }
-                }
 
-                dictionaryBlock?.Dispose();
+                    if (!optModel.IsDictionary)
+                    {
+                        code.AppendLine("else");
+                        using (code.StartBlock())
+                        {
+                            if (optModel.ValueHasErrorMessageOut)
+                            {
+                                code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
+                            }
+                            else
+                            {
+                                code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                            }
+                        }
+                    }
+
+                    dictionaryBlock?.Dispose();
+                }
                 break;
             default:
                 break;

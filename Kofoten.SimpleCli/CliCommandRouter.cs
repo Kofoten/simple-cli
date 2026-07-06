@@ -70,8 +70,9 @@ public sealed class CliCommandRouter<TFactoryFunction>(string commandDescription
 
             if (factory is CliCommandRouter<TFactoryFunction> commandRouter
                 &&
-                commandRouter.factories.TryGetValue(args[i], out factory))
+                commandRouter.factories.TryGetValue(args[i], out var nextFactory))
             {
+                factory = nextFactory;
                 continue;
             }
 

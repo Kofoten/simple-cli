@@ -5,6 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Kofoten.SimpleCli.DependencyInjection\Kofoten.SimpleCli.DependencyInjection.csproj" />
     <ProjectReference Include="..\Kofoten.SimpleCli\Kofoten.SimpleCli.csproj" />
     <ProjectReference Include="..\Kofoten.SimpleCli.Generator\Kofoten.SimpleCli.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
