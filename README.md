@@ -311,6 +311,7 @@ There are some limitations in what kind of cli that can be designed. Some limita
 ### Will change (probably)
 
 - Improved help text (include application name and version)
+- Better default value text resolution (for types that are not constant and item, key and value types for collections and dictionaries may cause ugly help text)
 
 ## Analyzer diagnostic codes
 
