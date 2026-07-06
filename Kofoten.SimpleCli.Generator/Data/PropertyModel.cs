@@ -8,6 +8,8 @@ internal abstract record PropertyModel(
     string ValueTypeName,
     string? KeyTypeName,
     SpecialType SpecialType,
+    SpecialType KeySpecialType,
+    SpecialType ValueSpecialType,
     bool IsRequired,
     bool IsCollection,
     CollectionType CollectionType,

@@ -83,5 +83,13 @@ namespace Kofoten.SimpleCli.Generator.Diagnostics
             category: "Kofoten.SimpleCli.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor RequiredPropertyWithDefaultValue = new(
+            id: "SCLI011",
+            title: "Required property with default value",
+            messageFormat: "A required argument or option property should not have a default value",
+            category: "Kofoten.SimpleCli.Generator",
+            defaultSeverity: DiagnosticSeverity.Warning,
+            isEnabledByDefault: true);
     }
 }

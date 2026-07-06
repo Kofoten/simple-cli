@@ -300,7 +300,7 @@ There are some limitations in what kind of cli that can be designed. Some limita
 - There is no detection for unknown options. Example: The only existing option is `--hello`, if the user writes `--x` nothing will happen and if the user writes `--hello --x` then `--x` will be passed as the value of `--hello`.
 - No support for `-` to indicate reading from stdin.
 - No middleware or interception pipeline.
-- No global options
+- No global options (currently you can use an abstract `BaseCommand` to achieve similar functionality).
 - No combined flags, you can not combine short names like `-v`, `-y`, `-k` to `-vyk`.
 - Support for custom help text formatters.
 - Optional default version querying via `-v` and `--version` (app scoped, meaning top level router only).
@@ -328,3 +328,4 @@ To ensure a smooth developer experience, `Kofoten.SimpleCli` includes a Roslyn a
 | **SCLI008** | Ambiguous CLI property binding | A property is marked with both `[CliArgument]` and `[CliOption]`, which is not allowed. | Error |
 | **SCLI009** | Missing parser | The type of a CLI property does not have a valid parser (e.g., no compatible `TryParse` method or `[CliParser]` attribute). | Error |
 | **SCLI010** | Invalid command accessibility | The command class must be declared as public or internal. | Error |
+| **SCLI011** | Redundant default value | A required argument or option property should not have a default value assigned. | Warning |

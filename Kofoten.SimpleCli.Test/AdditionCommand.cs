@@ -1,4 +1,5 @@
 ﻿using Kofoten.SimpleCli.Test.Data;
+using System.Collections.Frozen;
 
 namespace Kofoten.SimpleCli.Test;
 
@@ -26,7 +27,7 @@ internal class AdditionCommand(object imaginaryService) : BaseCommand
     public bool Version { get; init; } = false;
 
     [CliOption("cheese", Description = "Eats the specified cheese", Hidden = true)]
-    public required Cheese Cheese { get; init; } = new Cheese("Västerbotten", "Sweden");
+    public Cheese Cheese { get; init; } = new Cheese("Västerbotten", "Sweden");
 
     [CliOption("limit", Short = 'l', Description = "Sets a limit")]
     [CliParser(typeof(CliParsers), nameof(CliParsers.TryParseLimit))]
@@ -41,6 +42,9 @@ internal class AdditionCommand(object imaginaryService) : BaseCommand
 
     [CliOption("frozen-cheese")]
     public CheeseCollection FrozenCheese { get; init; } = [];
+
+    [CliOption("header")]
+    public FrozenDictionary<string, string> Header { get; init; } = new Dictionary<string, string>() { { "type", "human" }, { "role", "king" } }.ToFrozenDictionary();
 
     public override int Execute()
     {

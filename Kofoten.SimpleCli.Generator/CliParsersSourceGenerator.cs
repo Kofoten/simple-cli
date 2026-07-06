@@ -405,6 +405,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     continue;
                 }
 
+                string? defaultValueSyntax = null;
                 string? defaultValueString = null;
                 var syntaxReference = member.DeclaringSyntaxReferences.FirstOrDefault();
                 if (syntaxReference != null)
@@ -414,8 +415,50 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         &&
                         propertySyntax.Initializer != null)
                     {
-                        defaultValueString = propertySyntax.Initializer.Value.ToString();
+                        defaultValueSyntax = propertySyntax.Initializer.Value.ToString();
+
+                        var propertySemanticModel = compilation.GetSemanticModel(propertySyntax.SyntaxTree);
+                        var constantValue = propertySemanticModel.GetConstantValue(propertySyntax.Initializer.Value);
+                        if (constantValue.HasValue)
+                        {
+                            if (isEnum || isFlagsEnum)
+                            {
+                                defaultValueString = GetEnumDefaultValue(valueTypeSymbol, constantValue.Value!, isFlagsEnum);
+                            }
+                            else
+                            {
+                                defaultValueString = constantValue.Value?.ToString();
+                            }
+                        }
+                        else if (isCollection || isDictionary)
+                        {
+                            defaultValueString = FormatCollectionDefault(defaultValueSyntax, isDictionary);
+                        }
+                        else
+                        {
+                            if (!string.IsNullOrEmpty(defaultValueSyntax))
+                            {
+                                defaultValueString = defaultValueSyntax;
+                            }
+                        }
                     }
+                }
+
+                if (member.IsRequired && defaultValueString is not null)
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        DiagnosticDescriptors.RequiredPropertyWithDefaultValue,
+                        member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation()));
+                }
+
+                string[] allowedValueStrings = [];
+                if (valueTypeSymbol.TypeKind == TypeKind.Enum)
+                {
+                    allowedValueStrings = [.. valueTypeSymbol
+                        .GetMembers()
+                        .OfType<IFieldSymbol>()
+                        .Where(f => f.HasConstantValue)
+                        .Select(f => f.Name)];
                 }
 
                 if (argAttribute != null
@@ -432,6 +475,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         TypeName: typeName,
                         ValueTypeName: valueTypeName,
                         SpecialType: valueTypeSymbol.SpecialType,
+                        KeySpecialType: keyTypeSymbol?.SpecialType ?? SpecialType.None,
+                        ValueSpecialType: valueTypeSymbol.SpecialType,
                         IsRequired: member.IsRequired,
                         Description: description,
                         ValueParseMethodName: valueParserMethodName,
@@ -477,7 +522,9 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         TypeName: typeName,
                         ValueTypeName: valueTypeName,
                         KeyTypeName: keyTypeName,
-                        SpecialType: valueTypeSymbol.SpecialType,
+                        SpecialType: member.Type.SpecialType,
+                        KeySpecialType: keyTypeSymbol?.SpecialType ?? SpecialType.None,
+                        ValueSpecialType: valueTypeSymbol.SpecialType,
                         IsRequired: member.IsRequired,
                         Description: description,
                         ValueParseMethodName: valueParserMethodName,
@@ -485,6 +532,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         KeyParseMethodName: keyParserMethodName,
                         KeyHasErrorMessageOut: keyHasErrorMessageOut,
                         DefaultValueString: defaultValueString,
+                        DefaultValueSyntax: defaultValueSyntax,
+                        AllowedValueStrings: allowedValueStrings,
                         OptionName: optName,
                         ShortName: shortName,
                         IsCollection: isCollection,
@@ -549,11 +598,6 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     p.ShortName!.Value,
                     classSymbol.Name));
             }
-        }
-
-        if (diagnostics.Count > 0)
-        {
-            return new CommandGenerationResult(null, diagnostics.ToImmutable());
         }
 
         var command = new CommandModel(
@@ -707,6 +751,202 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
         collectionType = CollectionType.None;
         return false;
+    }
+
+    private static string GetEnumDefaultValue(ITypeSymbol enumType, object constantValue, bool isFlagsEnum)
+    {
+        try
+        {
+            long value = Convert.ToInt64(constantValue);
+            var fields = enumType.GetMembers()
+                .OfType<IFieldSymbol>()
+                .Where(f => f.HasConstantValue)
+                .ToList();
+
+            if (value == 0)
+            {
+                var zeroField = fields.FirstOrDefault(f => Convert.ToInt64(f.ConstantValue) == 0);
+                return zeroField?.Name ?? "0";
+            }
+
+            if (isFlagsEnum)
+            {
+                var names = new List<string>();
+                foreach (var field in fields)
+                {
+                    long fieldValue = Convert.ToInt64(field.ConstantValue);
+                    if (fieldValue != 0 && (value & fieldValue) == fieldValue)
+                    {
+                        names.Add(field.Name);
+                    }
+                }
+                return names.Count > 0 ? string.Join(", ", names) : value.ToString();
+            }
+
+            var exactField = fields.FirstOrDefault(f => Convert.ToInt64(f.ConstantValue) == value);
+            return exactField?.Name ?? value.ToString();
+        }
+        catch
+        {
+            return constantValue?.ToString() ?? string.Empty;
+        }
+    }
+
+    private static string FormatCollectionDefault(string text, bool isDictionary)
+    {
+        text = text.Trim();
+        var start = text.IndexOf('{');
+        if (start == -1)
+        {
+            start = text.IndexOf('[');
+        }
+
+        var end = text.LastIndexOf('}');
+        if (end == -1)
+        {
+            end = text.LastIndexOf(']');
+        }
+
+        if (start == -1 || end == -1 || end < start)
+        {
+            if (text.StartsWith("new") || text.Contains(".Empty"))
+            {
+                return "[]";
+            }
+
+            return text;
+        }
+
+        string content = text.Substring(start + 1, end - start - 1).Trim();
+        if (string.IsNullOrEmpty(content))
+        {
+            return "[]";
+        }
+
+        var items = new List<string>();
+        bool inString = false;
+        bool escapeNext = false;
+        int braceDepth = 0;
+        int bracketDepth = 0;
+        int parenDepth = 0;
+        int lastSplit = 0;
+
+        for (int i = 0; i < content.Length; i++)
+        {
+            char c = content[i];
+
+            if (escapeNext)
+            {
+                escapeNext = false;
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                escapeNext = true;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inString = !inString;
+                continue;
+            }
+
+            if (!inString)
+            {
+                switch (c)
+                {
+                    case '{':
+                        braceDepth++;
+                        break;
+                    case '}':
+                        braceDepth--;
+                        break;
+                    case '[':
+                        bracketDepth++;
+                        break;
+                    case ']':
+                        bracketDepth--;
+                        break;
+                    case '(':
+                        parenDepth++;
+                        break;
+                    case ')':
+                        parenDepth--;
+                        break;
+                    case ',' when braceDepth == 0 && bracketDepth == 0 && parenDepth == 0:
+                        items.Add(content.Substring(lastSplit, i - lastSplit));
+                        lastSplit = i + 1;
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+
+        var finalItem = content.Substring(lastSplit, content.Length - lastSplit);
+        if (!string.IsNullOrWhiteSpace(finalItem))
+        {
+            items.Add(finalItem);
+        }
+
+        var formattedItems = new List<string>();
+        foreach (var item in items)
+        {
+            string cleaned = item.Trim();
+
+            if (isDictionary)
+            {
+                cleaned = CleanKeyValuePair(cleaned);
+            }
+            else
+            {
+                cleaned = cleaned.Trim('"', '\'');
+            }
+
+            formattedItems.Add(cleaned);
+        }
+
+        return "[" + string.Join(" ", formattedItems) + "]";
+    }
+
+    private static string CleanKeyValuePair(string pair)
+    {
+        pair = pair.Trim();
+        string key = string.Empty;
+        string value = string.Empty;
+
+        if (pair.StartsWith("["))
+        {
+            int closeBracket = pair.IndexOf(']');
+            int equals = pair.IndexOf('=', closeBracket);
+
+            if (closeBracket != -1 && equals != -1)
+            {
+                key = pair.Substring(1, closeBracket - 1).Trim();
+                value = pair.Substring(equals + 1).Trim();
+            }
+        }
+        else if (pair.StartsWith("{") && pair.EndsWith("}"))
+        {
+            string inner = pair.Substring(1, pair.Length - 2).Trim();
+            int firstComma = inner.IndexOf(',');
+            if (firstComma != -1)
+            {
+                key = inner.Substring(0, firstComma).Trim();
+                value = inner.Substring(firstComma + 1).Trim();
+            }
+        }
+        else
+        {
+            return pair;
+        }
+
+        key = key.Trim('"', '\'');
+        value = value.Trim('"', '\'');
+
+        return $"{key}={value}";
     }
 
     /// <summary>
@@ -944,23 +1184,36 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
                     code.Append($"--{option.OptionName}".PadRight(optionNameLength, ' '));
                     code.Append(option.Description);
+
+                    var metadata = new List<string>();
                     if (option.IsRequired)
                     {
-                        code.AppendLine(" [Required]", applyIndent: false);
+                        metadata.Add("Required");
                     }
-                    else if (option.SpecialType == SpecialType.System_Boolean)
+
+                    if (option.SpecialType != SpecialType.System_Boolean
+                        &&
+                        !string.IsNullOrWhiteSpace(option.DefaultValueString))
                     {
-                        code.AppendLine(applyIndent: false);
+                        metadata.Add($"Default: {option.DefaultValueString}");
                     }
-                    else if (!string.IsNullOrWhiteSpace(option.DefaultValueString))
+
+                    if (option.AllowedValueStrings.Length > 0)
                     {
-                        var defaultValue = option.DefaultValueString!.Trim('"', '\'').Replace("\"", "\"\"");
-                        code.AppendLine($" [Default: {defaultValue}]", applyIndent: false);
+                        metadata.Add($"Allowed: {string.Join(", ", option.AllowedValueStrings)}");
                     }
-                    else
+
+                    if (metadata.Count > 0)
                     {
-                        code.AppendLine(applyIndent: false);
+                        if (!string.IsNullOrEmpty(option.Description))
+                        {
+                            code.Append(" ");
+                        }
+
+                        code.Append($"({string.Join("; ", metadata)})");
                     }
+
+                    code.AppendLine(applyIndent: false);
                 }
 
                 code.Append("  -h, ");
@@ -1031,9 +1284,9 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         {
                             code.AppendLine($"bool opt_{opt.Name} = false;");
                         }
-                        else if (!string.IsNullOrWhiteSpace(opt.DefaultValueString))
+                        else if (!string.IsNullOrWhiteSpace(opt.DefaultValueSyntax))
                         {
-                            code.AppendLine($"{opt.TypeName} opt_{opt.Name} = {opt.DefaultValueString};");
+                            code.AppendLine($"{opt.TypeName} opt_{opt.Name} = {opt.DefaultValueSyntax};");
                         }
                         else
                         {
@@ -1552,12 +1805,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
                 else
                 {
-                    var valueAccessor = "args.Array[i]";
-
                     if (optModel.IsDictionary)
                     {
-                        valueAccessor = "valuePart";
-
                         code.AppendLine("global::System.String currentArg = args.Array[i];");
                         code.AppendLine("global::System.Int32 delimiterIndex = currentArg.IndexOf(\"=\");");
                         code.AppendLine();
@@ -1573,65 +1822,78 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         code.AppendLine("global::System.String valuePart = currentArg.Substring(delimiterIndex + 1);");
                         code.AppendLine("global::System.Boolean isValidKVP = true;");
                         code.AppendLine();
-                        code.Append($"if (!{optModel.KeyParseMethodName}(keyPart, out {optModel.KeyTypeName} k", applyIndent: true);
 
-                        if (optModel.KeyHasErrorMessageOut)
+                        if (optModel.KeySpecialType != SpecialType.System_String)
+                        {
+                            code.Append($"if (!{optModel.KeyParseMethodName}(keyPart, out {optModel.KeyTypeName} k", applyIndent: true);
+
+                            if (optModel.KeyHasErrorMessageOut)
+                            {
+                                code.Append(", out global::System.String customError");
+                            }
+
+                            code.AppendLine("))", applyIndent: false);
+                            using (code.StartBlock())
+                            {
+                                if (optModel.KeyHasErrorMessageOut)
+                                {
+                                    code.AppendLine($"errors.Add($\"Failed to parse key for option '--{optModel.OptionName}': {{customError}}\");");
+                                }
+                                else
+                                {
+                                    code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                                }
+                                code.AppendLine("isValidKVP = false;");
+                            }
+
+                            code.AppendLine();
+                        }
+
+                        if (optModel.ValueSpecialType != SpecialType.System_String)
+                        {
+                            code.Append($"if (!{optModel.ValueParseMethodName}(valuePart, out {optModel.ValueTypeName} v", applyIndent: true);
+
+                            if (optModel.ValueHasErrorMessageOut)
+                            {
+                                if (optModel.KeyHasErrorMessageOut && optModel.KeySpecialType != SpecialType.System_String)
+                                {
+                                    code.Append(", out customError");
+                                }
+                                else
+                                {
+                                    code.Append(", out global::System.String customError");
+                                }
+                            }
+
+                            code.AppendLine("))", applyIndent: false);
+                            using (code.StartBlock())
+                            {
+                                if (optModel.ValueHasErrorMessageOut)
+                                {
+                                    code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
+                                }
+                                else
+                                {
+                                    code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
+                                }
+                                code.AppendLine("isValidKVP = false;");
+                            }
+
+                            code.AppendLine();
+                        }
+
+                        code.AppendLine("if (isValidKVP)");
+                    }
+                    else
+                    {
+                        code.Append($"if ({optModel.ValueParseMethodName}(args.Array[i], out {optModel.ValueTypeName} v", applyIndent: true);
+
+                        if (optModel.ValueHasErrorMessageOut)
                         {
                             code.Append(", out global::System.String customError");
                         }
 
                         code.AppendLine("))", applyIndent: false);
-                        using (code.StartBlock())
-                        {
-                            if (optModel.KeyHasErrorMessageOut)
-                            {
-                                code.AppendLine($"errors.Add($\"Failed to parse key for option '--{optModel.OptionName}': {{customError}}\");");
-                            }
-                            else
-                            {
-                                code.AppendLine($"errors.Add($\"Invalid {optModel.KeyTypeName} key ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
-                            }
-                            code.AppendLine("isValidKVP = false;");
-                        }
-                        code.AppendLine();
-                        code.Append($"if (!", applyIndent: true);
-                    }
-                    else
-                    {
-                        code.Append($"if (", applyIndent: true);
-                    }
-
-                    code.Append($"{optModel.ValueParseMethodName}({valueAccessor}, out {optModel.ValueTypeName} v");
-                    if (optModel.ValueHasErrorMessageOut)
-                    {
-                        if (optModel.KeyHasErrorMessageOut)
-                        {
-                            code.Append(", out customError");
-                        }
-                        else
-                        {
-                            code.Append(", out global::System.String customError");
-                        }
-                    }
-                    code.AppendLine("))", applyIndent: false);
-
-                    if (optModel.IsDictionary)
-                    {
-                        using (code.StartBlock())
-                        {
-                            if (optModel.ValueHasErrorMessageOut)
-                            {
-                                code.AppendLine($"errors.Add($\"Failed to parse option '--{optModel.OptionName}': {{customError}}\");");
-                            }
-                            else
-                            {
-                                code.AppendLine($"errors.Add($\"Invalid {optModel.ValueTypeName} value ({{args.Array[i]}}) for option '--{optModel.OptionName}' at position {{i}}.\");");
-                            }
-                            code.AppendLine("isValidKVP = false;");
-                        }
-                        code.AppendLine();
-                        code.AppendLine("if (isValidKVP)");
-
                     }
                 }
 
@@ -1643,7 +1905,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
                     else if (model.IsDictionary)
                     {
-                        code.AppendLine($"opt_{optModel.Name}.Add(new global::System.Collections.Generic.KeyValuePair<{optModel.KeyTypeName}, {optModel.ValueTypeName}>(k, v));");
+                        var keyName = optModel.KeySpecialType == SpecialType.System_String ? "keyPart" : "k";
+                        var valueName = optModel.ValueSpecialType == SpecialType.System_String ? "valuePart" : "v";
+
+                        code.AppendLine($"opt_{optModel.Name}.Add(new global::System.Collections.Generic.KeyValuePair<{optModel.KeyTypeName}, {optModel.ValueTypeName}>({keyName}, {valueName}));");
                     }
                     else if (model.IsCollection)
                     {
