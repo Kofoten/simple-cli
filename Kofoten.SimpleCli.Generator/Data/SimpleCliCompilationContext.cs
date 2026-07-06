@@ -5,11 +5,12 @@ namespace Kofoten.SimpleCli.Generator.Data;
 
 internal record SimpleCliCompilationContext(
     INamedTypeSymbol? CliParsableSymbol,
+    INamedTypeSymbol? CliValidationResultSymbol,
     INamedTypeSymbol? CliArgumentAttributeSymbol,
     INamedTypeSymbol? CliOptionAttributeSymbol,
     INamedTypeSymbol? CliParserAttributeSymbol,
     INamedTypeSymbol? CliKeyParserAttributeSymbol,
-    INamedTypeSymbol? FlagsAttributeSymbol,
+    INamedTypeSymbol? CliFlagsAttributeSymbol,
     INamedTypeSymbol? EnumerableOfTSymbol,
     INamedTypeSymbol? KeyValuePairOfT2Symbol,
     INamedTypeSymbol? ListOfTSymbol,

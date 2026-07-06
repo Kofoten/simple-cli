@@ -31,6 +31,16 @@ namespace Kofoten.SimpleCli.NetstandardTest
         [CliOption("table", Short = 't', Description = "Print each step as a table.")]
         public bool Table { get; set; } = false;
 
+        internal CliValidationResult Validate()
+        {
+            if (FirstNumber < 0)
+            {
+                return new CliValidationResult.Failure(new string[] { $"{nameof(FirstNumber)} must be a positive integer" });
+            }
+
+            return new CliValidationResult.Success();
+        }
+
         public int Execute()
         {
             int[] allNumbers = new int[] { FirstNumber, SecondNumber }.Concat(AdditionalNumbers).ToArray();

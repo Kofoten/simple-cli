@@ -6,6 +6,10 @@ This cli library was built because I could not find anything out there which had
 
 This library is designed to be incredibly easy to use and requires minimal effort to get up and running.
 
+### Validation
+
+There is no declarative validation. However you can implement a method named `Validate` which takes no parameters and returns a `CliValidationResult` to add validation such as ensuring strings match a specific regex or an integer falls in a specified interval. This method **may not** be abstract, async or static and **must** be public or internal. This method is called after instantiating the command, however if a failure is returned it is treated as a parsing failure and will invoke the exception handler with a `CliParseException` or throw if the `Parse` method was called directly without using the `CliCommandBuilder`.
+
 ### Example implementation
 
 AdditionCommand.cs
@@ -27,6 +31,16 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
 
     [CliOption("verbose", Short = 'V', Description = "Print the result of each addition.")]
     public bool Verbose { get; init; } = false;
+
+    public CliValidationResult Validate()
+    {
+        if (FirstNumber < 0)
+        {
+            return new CliValidationResult.Failure([$"{nameof(FirstNumber)} must be a positive integer"]);
+        }
+
+        return new CliValidationResult.Success();
+    }
 
     public int Execute()
     {
@@ -169,16 +183,16 @@ Implement the second version if you want to provide a specific error message to 
 
 #### Custom parsing
 
-If you are trying to parse external types that you can not simple add a `TryParse` method to you can use the `CliParserAttribute` to point the source generation to a specific method that should be used for parsing. These methods must have the same signature ase previously mentioned `TryParse` methods.
+If you are trying to parse external types that you can not simply add a `TryParse` method to you can use the `CliParserAttribute` to point the source generation to a specific method that should be used for parsing. These methods must have the same signature as previously mentioned `TryParse` methods.
 
-⚠️ This is not applicable to multi value or key value pair options. Instead the specified parser will be applied to the elements and values of these types. To define a custom key parser, use the `CliKeyParserAttribute`. The only way to achive custom multi value parsing is to create a type that uses the standard `TryParse` method and it **MUST NOT** implement the `IEnumerable<T>` interface. and values can not be passed seperatley.
+⚠️ This is not applicable to multi value or key value pair options. Instead the specified parser will be applied to the elements and values of these types. To define a custom key parser, use the `CliKeyParserAttribute`. The only way to achieve custom multi value parsing is to create a type that uses the standard `TryParse` method and it **MUST NOT** implement the `IEnumerable<T>` interface, and values cannot be passed separately.
 
 Example:
 
 ```c#
 public static class CustomCliParsers
 {
-    public static bool TryParseExtrenalType(string s, [NotNullWhen(true)] out ExternalType? v, [NotNullWhen(false)] out string? error)
+    public static bool TryParseExternalType(string s, [NotNullWhen(true)] out ExternalType? v, [NotNullWhen(false)] out string? error)
     {
         var parts = s.Split('|');
         if (parts.All(p => p.Length > 0 && char.IsUpper(p[0])))
@@ -197,7 +211,7 @@ public static class CustomCliParsers
 
 ```c#
 [CliOption("named-parts", Description = "Sets the parts to use for building something cool.")]
-[CliParser(typeof(CliParsers), nameof(CliParsers.TryParseExtrenalType))]
+[CliParser(typeof(CliParsers), nameof(CliParsers.TryParseExternalType))]
 public required ExternalType NamedParts { get; init; }
 ```
 
@@ -265,7 +279,7 @@ There are some limitations in what kind of cli that can be designed. Some limita
 - The options `-h` and `--help` are reserved to print help text.
 - No rich console UI (There are many other great libraries out there and i have no interest in developing such).
 - No configuration file or environment variable binding (use existing builtin features).
-- Use of `--` is required to begin parsing arguments **after** options have been passed and no more options may follow, evrything after `--` is treated as arguments.
+- Use of `--` is required to begin parsing arguments **after** options have been passed and no more options may follow, everything after `--` is treated as arguments.
 
 ### May change
 
@@ -275,11 +289,14 @@ There are some limitations in what kind of cli that can be designed. Some limita
 - No middleware or interception pipeline.
 - No global options
 - No combined flags, you can not combine short names like `-v`, `-y`, `-k` to `-vyk`.
+- Support for custom help text formatters.
+- Optional default version querying via `-v` and `--version` (app scoped, meaning top level router only).
+- No shell auto completions.
 
 ### Will change (probably)
 
-- No validation pipeline (currently you can use custom parsers to hook into the parsing pipeline using the `CliParserAttribute` and the error message out signature for custom validation).
-- No shell auto completions.
+- Inherited members from base classes are currently **not** detected or mapped by the source generator. The CLI properties (arguments/options) and the `Validate()` method must be declared directly on the target command class.
+- Improved help text (include application name and version)
 
 ## Analyzer diagnostic codes
 
@@ -296,3 +313,4 @@ To ensure a smooth developer experience, `Kofoten.SimpleCli` includes a Roslyn a
 | **SCLI007** | Unsupported collection type | A property is using a collection type that is not supported by the generator. | Error |
 | **SCLI008** | Ambiguous CLI property binding | A property is marked with both `[CliArgument]` and `[CliOption]`, which is not allowed. | Error |
 | **SCLI009** | Missing parser | The type of a CLI property does not have a valid parser (e.g., no compatible `TryParse` method or `[CliParser]` attribute). | Error |
+| **SCLI010** | Invalid command accessibility | The command class must be declared as public or internal. | Error |

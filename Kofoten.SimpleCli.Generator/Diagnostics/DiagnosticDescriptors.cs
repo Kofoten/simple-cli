@@ -75,5 +75,13 @@ namespace Kofoten.SimpleCli.Generator.Diagnostics
             category: "Kofoten.SimpleCli.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor InvalidCommandAccessibility = new(
+            id: "SCLI010",
+            title: "Invalid command accessibility",
+            messageFormat: "Command must be declared as public or internal",
+            category: "Kofoten.SimpleCli.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
     }
 }

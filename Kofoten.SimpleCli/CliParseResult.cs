@@ -2,13 +2,13 @@
 
 namespace Kofoten.SimpleCli;
 
-public record CliParseResult
+public abstract record CliParseResult
 {
-    protected CliParseResult()
+    protected internal CliParseResult()
     {
     }
 
-    public record Success : CliParseResult
+    public sealed record Success : CliParseResult
     {
         public ICliParsable Parsable { get; private set; }
 
@@ -19,7 +19,7 @@ public record CliParseResult
         }
     }
 
-    public record Failure : CliParseResult
+    public sealed record Failure : CliParseResult
     {
         public IEnumerable<string> Errors { get; private set; }
 

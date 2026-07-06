@@ -5,7 +5,7 @@ namespace Kofoten.SimpleCli.Test;
 /// <summary>
 /// Adds numbers togheter and prints the result.
 /// </summary>
-public class AdditionCommand(object imaginaryService) : ICliCommand
+internal class AdditionCommand(object imaginaryService) : ICliCommand
 {
     [CliArgument(0, nameof(FirstNumber), Description = "The first number to add.")]
     public required int FirstNumber { get; init; }
@@ -74,6 +74,16 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
         Console.WriteLine($"The sum is: {sum}");
 
         return 0;
+    }
+
+    internal CliValidationResult Validate()
+    {
+        if (FirstNumber < 0)
+        {
+            return new CliValidationResult.Failure([$"{nameof(FirstNumber)} must be a positive integer"]);
+        }
+
+        return new CliValidationResult.Success();
     }
 
     private static void PrintStepResult(int sum, ReadOnlySpan<int> remainingNumbers)

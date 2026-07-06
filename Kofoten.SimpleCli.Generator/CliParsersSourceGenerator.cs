@@ -80,11 +80,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
             return new SimpleCliCompilationContext(
                 CliParsableSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.ICliParsable"),
+                CliValidationResultSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliValidationResult"),
                 CliArgumentAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliArgumentAttribute"),
                 CliOptionAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliOptionAttribute"),
                 CliParserAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliParserAttribute"),
                 CliKeyParserAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.SimpleCli.CliKeyParserAttribute"),
-                FlagsAttributeSymbol: compilation.GetTypeByMetadataName("System.FlagsAttribute"),
+                CliFlagsAttributeSymbol: compilation.GetTypeByMetadataName("System.FlagsAttribute"),
                 EnumerableOfTSymbol: iEnumerableOfT,
                 KeyValuePairOfT2Symbol: compilation.GetTypeByMetadataName("System.Collections.Generic.KeyValuePair`2"),
                 ListOfTSymbol: compilation.GetTypeByMetadataName("System.Collections.Generic.List`1"),
@@ -173,6 +174,20 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             return new CommandGenerationResult(null, diagnostics.ToImmutable());
         }
 
+        var accessibility = "public";
+        if (classSymbol.DeclaredAccessibility == Accessibility.Public
+            ||
+            classSymbol.DeclaredAccessibility == Accessibility.Internal)
+        {
+            accessibility = classSymbol.DeclaredAccessibility.ToString().ToLower();
+        }
+        else
+        {
+            diagnostics.Add(Diagnostic.Create(
+                DiagnosticDescriptors.InvalidCommandAccessibility,
+                classDecl.Identifier.GetLocation()));
+        }
+
         var constructorParams = new List<ConstructorParameterModel>();
         foreach (var param in publicConstructors[0].Parameters)
         {
@@ -181,6 +196,13 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 TypeName: param.Type.ToDisplayString()
             ));
         }
+
+        var hasValidationMethod = classSymbol.GetMembers().OfType<IMethodSymbol>()
+            .Where(m => m.Name == "Validate")
+            .Where(m => !m.IsAbstract && !m.IsStatic && !m.IsAsync)
+            .Where(m => m.Parameters.Length == 0)
+            .Where(m => m.DeclaredAccessibility == Accessibility.Public || m.DeclaredAccessibility == Accessibility.Internal)
+            .Any(m => SymbolEqualityComparer.Default.Equals(m.ReturnType, simpleCliContext.CliValidationResultSymbol));
 
         var properties = new List<PropertyModel>();
         foreach (var member in classSymbol.GetMembers().OfType<IPropertySymbol>())
@@ -298,7 +320,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             else if (isEnum)
             {
                 valueHasValidParser = true;
-                isFlagsEnum = valueTypeSymbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.FlagsAttributeSymbol));
+                isFlagsEnum = valueTypeSymbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliFlagsAttributeSymbol));
             }
             else if (valueTypeSymbol.SpecialType == SpecialType.System_String) // NOTE: valueTypeSymbol may have changed after first isString check.
             {
@@ -426,7 +448,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 var description = descriptionArg.Value.Value is string d ? d : string.Empty;
 
                 var hiddenArg = optAttribute.NamedArguments.FirstOrDefault(x => x.Key == "Hidden");
-                var hidden = hiddenArg.Value.Value is bool h ? h : false;
+                var hidden = hiddenArg.Value.Value is bool h && h;
 
                 properties.Add(new OptionPropertyModel(
                     Name: member.Name,
@@ -515,11 +537,13 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
         var command = new CommandModel(
             Namespace: classSymbol.ContainingNamespace.ToDisplayString(),
+            Accessibility: accessibility,
             ClassName: classSymbol.Name,
             Description: GetCommandDescription(classSymbol),
             ConstructorParameters: constructorParams,
             Properties: properties,
             HasDependencyInjection: simpleCliContext.HasDependencyInjection,
+            HasValidationMethod: hasValidationMethod,
             Usings: usings);
 
         return new CommandGenerationResult(command, diagnostics.ToImmutable());
@@ -856,7 +880,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         code.AppendLine($"namespace {command.Namespace}");
         using (code.StartBlock())
         {
-            code.AppendLine($"public static class {command.ClassName}Parser");
+            code.AppendLine($"{command.Accessibility} static class {command.ClassName}Parser");
             using (code.StartBlock())
             {
                 var arguments = command.Properties.OfType<ArgumentPropertyModel>().OrderBy(p => p.Position).ToList();
@@ -1230,8 +1254,35 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                             }
                         }
                         code.AppendLine("};");
+
                         code.AppendLine();
-                        code.AppendLine("return new global::Kofoten.SimpleCli.CliParseResult.Success(command);");
+                        if (command.HasValidationMethod)
+                        {
+                            code.AppendLine("var validationResult = command.Validate();");
+                            code.AppendLine("switch (validationResult)");
+                            using (code.StartBlock(addTrailingSemicolon: true))
+                            {
+                                code.AppendLine("case global::Kofoten.SimpleCli.CliValidationResult.Success _:");
+                                using (code.Indent())
+                                {
+                                    code.AppendLine("return new global::Kofoten.SimpleCli.CliParseResult.Success(command);");
+                                }
+                                code.AppendLine("case global::Kofoten.SimpleCli.CliValidationResult.Failure f:");
+                                using (code.Indent())
+                                {
+                                    code.AppendLine("return new global::Kofoten.SimpleCli.CliParseResult.Failure(f.Errors);");
+                                }
+                                code.AppendLine("default:");
+                                using (code.Indent())
+                                {
+                                    code.AppendLine("throw new global::System.InvalidOperationException(\"Unexpected validation result.\");");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            code.AppendLine("return new global::Kofoten.SimpleCli.CliParseResult.Success(command);");
+                        }
                     }
 
                     code.AppendLine();
@@ -1239,7 +1290,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
 
                 code.AppendLine();
-                code.Append($"public static {command.ClassName} Parse(global::System.String[] args", applyIndent: true);
+                code.Append($"{command.Accessibility} static {command.ClassName} Parse(global::System.String[] args", applyIndent: true);
 
                 foreach (var ctorParam in command.ConstructorParameters)
                 {
@@ -1287,7 +1338,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
 
                 code.AppendLine();
-                code.Append($"public static void Map{command.ClassName}(this global::Kofoten.SimpleCli.CliCommandRouter<global::System.Func<global::Kofoten.SimpleCli.CliParseResult>> router, global::System.String verb", applyIndent: true);
+                code.Append($"{command.Accessibility} static void Map{command.ClassName}(this global::Kofoten.SimpleCli.CliCommandRouter<global::System.Func<global::Kofoten.SimpleCli.CliParseResult>> router, global::System.String verb", applyIndent: true);
 
                 foreach (var ctorParam in command.ConstructorParameters)
                 {
@@ -1323,7 +1374,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
 
                 code.AppendLine();
-                code.AppendLine($"public class {command.ClassName}Factory : global::Kofoten.SimpleCli.ICliCommandFactory<global::System.Func<global::Kofoten.SimpleCli.CliParseResult>>");
+                code.AppendLine($"private class {command.ClassName}Factory : global::Kofoten.SimpleCli.ICliCommandFactory<global::System.Func<global::Kofoten.SimpleCli.CliParseResult>>");
                 using (code.StartBlock())
                 {
                     foreach (var ctorParam in command.ConstructorParameters)
@@ -1376,7 +1427,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 if (command.HasDependencyInjection)
                 {
                     code.AppendLine();
-                    code.AppendLine($"public static void Map{command.ClassName}(this global::Kofoten.SimpleCli.CliCommandRouter<global::System.Func<global::System.IServiceProvider, global::Kofoten.SimpleCli.CliParseResult>> router, global::System.String verb)");
+                    code.AppendLine($"{command.Accessibility} static void Map{command.ClassName}(this global::Kofoten.SimpleCli.CliCommandRouter<global::System.Func<global::System.IServiceProvider, global::Kofoten.SimpleCli.CliParseResult>> router, global::System.String verb)");
                     using (code.StartBlock())
                     {
                         code.AppendLine("if (router is null)");
@@ -1394,7 +1445,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
 
                     code.AppendLine();
-                    code.AppendLine($"public class DependencyInjection{command.ClassName}Factory : global::Kofoten.SimpleCli.ICliCommandFactory<global::System.Func<global::System.IServiceProvider, global::Kofoten.SimpleCli.CliParseResult>>");
+                    code.AppendLine($"private class DependencyInjection{command.ClassName}Factory : global::Kofoten.SimpleCli.ICliCommandFactory<global::System.Func<global::System.IServiceProvider, global::Kofoten.SimpleCli.CliParseResult>>");
                     using (code.StartBlock())
                     {
                         code.AppendLine("public global::System.Boolean IsLeaf => true;");

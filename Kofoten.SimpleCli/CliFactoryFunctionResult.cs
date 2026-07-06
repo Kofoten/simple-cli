@@ -2,16 +2,16 @@
 
 namespace Kofoten.SimpleCli;
 
-public record CliFactoryFunctionResult<TFactoryFunction>
+public abstract record CliFactoryFunctionResult<TFactoryFunction>
 {
     public string HelpText { get; private set; }
 
-    protected CliFactoryFunctionResult(string helpText)
+    protected internal CliFactoryFunctionResult(string helpText)
     {
         HelpText = helpText;
     }
 
-    public record Success : CliFactoryFunctionResult<TFactoryFunction>
+    public sealed record Success : CliFactoryFunctionResult<TFactoryFunction>
     {
         public TFactoryFunction FactoryFunction { get; private set; }
 
@@ -22,7 +22,7 @@ public record CliFactoryFunctionResult<TFactoryFunction>
         }
     }
 
-    public record Failure : CliFactoryFunctionResult<TFactoryFunction>
+    public sealed record Failure : CliFactoryFunctionResult<TFactoryFunction>
     {
         public IEnumerable<string> Errors { get; private set; }
 
@@ -33,7 +33,7 @@ public record CliFactoryFunctionResult<TFactoryFunction>
         }
     }
 
-    public record Usage : CliFactoryFunctionResult<TFactoryFunction>
+    public sealed record Usage : CliFactoryFunctionResult<TFactoryFunction>
     {
         internal Usage(string helpText)
             : base(helpText)
