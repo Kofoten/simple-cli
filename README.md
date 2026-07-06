@@ -305,6 +305,8 @@ There are some limitations in what kind of cli that can be designed. Some limita
 - Support for custom help text formatters.
 - Optional default version querying via `-v` and `--version` (app scoped, meaning top level router only).
 - No shell auto completions.
+- Does **not** support the key value option pattern, meaning `--name=Kofoten` is not supported. The value of an option must be seperated from the option name using a space (`--name Kofoten`).
+- Does **not** support the comma seperated multi value option pattern, meaning `--names Kofoten,Rasmus` is not supported except for flag enum values. The values must be seperated using a space (`--names Kofoten Rasmus`).
 
 ### Will change (probably)
 
