@@ -5,7 +5,7 @@ namespace Kofoten.SimpleCli.Test;
 /// <summary>
 /// Adds numbers togheter and prints the result.
 /// </summary>
-internal class AdditionCommand(object imaginaryService) : ICliCommand
+internal class AdditionCommand(object imaginaryService) : BaseCommand
 {
     [CliArgument(0, nameof(FirstNumber), Description = "The first number to add.")]
     public required int FirstNumber { get; init; }
@@ -36,16 +36,13 @@ internal class AdditionCommand(object imaginaryService) : ICliCommand
     [CliParser(typeof(CliParsers), nameof(CliParsers.TryParseSignature))]
     public string Signature { get; init; } = "Kangaxx";
 
-    [CliOption("weather", Short = 'w', Description = "Whats the weather")]
-    public Weather Weather { get; init; } = Weather.Sunny;
-
     [CliOption("indexed-cheese")]
     public CheeseLookup IndexedCheeses { get; init; } = [];
 
     [CliOption("frozen-cheese")]
     public CheeseCollection FrozenCheese { get; init; } = [];
 
-    public int Execute()
+    public override int Execute()
     {
         int[] allNumbers = [FirstNumber, SecondNumber, .. AdditionalNumbers];
         int sum = allNumbers[0];

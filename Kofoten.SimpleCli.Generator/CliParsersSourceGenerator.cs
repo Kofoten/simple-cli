@@ -150,6 +150,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             return new CommandGenerationResult(null, diagnostics.ToImmutable());
         }
 
+        if (classSymbol.IsAbstract)
+        {
+            return new CommandGenerationResult(null, diagnostics.ToImmutable());
+        }
+
         var compilation = semanticModel.Compilation;
 
         var inheritsCommand = classSymbol.AllInterfaces.Any(interfaceSymbol =>
@@ -158,6 +163,20 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         if (!inheritsCommand)
         {
             return new CommandGenerationResult(null, diagnostics.ToImmutable());
+        }
+
+        var accessibility = "internal";
+        if (classSymbol.DeclaredAccessibility == Accessibility.Public
+            ||
+            classSymbol.DeclaredAccessibility == Accessibility.Internal)
+        {
+            accessibility = classSymbol.DeclaredAccessibility.ToString().ToLower();
+        }
+        else
+        {
+            diagnostics.Add(Diagnostic.Create(
+                DiagnosticDescriptors.InvalidCommandAccessibility,
+                classDecl.Identifier.GetLocation()));
         }
 
         var publicConstructors = classSymbol.Constructors
@@ -174,20 +193,6 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             return new CommandGenerationResult(null, diagnostics.ToImmutable());
         }
 
-        var accessibility = "public";
-        if (classSymbol.DeclaredAccessibility == Accessibility.Public
-            ||
-            classSymbol.DeclaredAccessibility == Accessibility.Internal)
-        {
-            accessibility = classSymbol.DeclaredAccessibility.ToString().ToLower();
-        }
-        else
-        {
-            diagnostics.Add(Diagnostic.Create(
-                DiagnosticDescriptors.InvalidCommandAccessibility,
-                classDecl.Identifier.GetLocation()));
-        }
-
         var constructorParams = new List<ConstructorParameterModel>();
         foreach (var param in publicConstructors[0].Parameters)
         {
@@ -197,286 +202,302 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             ));
         }
 
-        var hasValidationMethod = classSymbol.GetMembers().OfType<IMethodSymbol>()
-            .Where(m => m.Name == "Validate")
-            .Where(m => !m.IsAbstract && !m.IsStatic && !m.IsAsync)
-            .Where(m => m.Parameters.Length == 0)
-            .Where(m => m.DeclaredAccessibility == Accessibility.Public || m.DeclaredAccessibility == Accessibility.Internal)
-            .Any(m => SymbolEqualityComparer.Default.Equals(m.ReturnType, simpleCliContext.CliValidationResultSymbol));
-
+        var hasValidationMethod = false;
         var properties = new List<PropertyModel>();
-        foreach (var member in classSymbol.GetMembers().OfType<IPropertySymbol>())
+        var processedPropertyNames = new HashSet<string>();
+        var propertySymbolsByName = new Dictionary<string, IPropertySymbol>();
+        var currentClassSymbol = classSymbol;
+        while (currentClassSymbol is not null && currentClassSymbol.SpecialType != SpecialType.System_Object)
         {
-            var argAttribute = member.GetAttributes().FirstOrDefault(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliArgumentAttributeSymbol));
-
-            var optAttribute = member.GetAttributes().FirstOrDefault(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliOptionAttributeSymbol));
-
-            if (argAttribute == null && optAttribute == null)
+            if (!hasValidationMethod)
             {
-                // NOTE: Property is not decorated as a CLI option or argument and should therfore be skipped.
-                continue;
+                hasValidationMethod = currentClassSymbol.GetMembers().OfType<IMethodSymbol>()
+                    .Where(m => m.Name == "Validate")
+                    .Where(m => !m.IsAbstract && !m.IsStatic && !m.IsAsync)
+                    .Where(m => m.Parameters.Length == 0)
+                    .Where(m => m.DeclaredAccessibility == Accessibility.Public || m.DeclaredAccessibility == Accessibility.Internal)
+                    .Any(m => SymbolEqualityComparer.Default.Equals(m.ReturnType, simpleCliContext.CliValidationResultSymbol));
             }
 
-            if (argAttribute != null && optAttribute != null)
+            foreach (var member in currentClassSymbol.GetMembers().OfType<IPropertySymbol>())
             {
-                diagnostics.Add(Diagnostic.Create(
-                    DiagnosticDescriptors.AmbiguousCliPropertyBinding,
-                    member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
-                    member.Name));
+                if (!processedPropertyNames.Add(member.Name))
+                {
+                    // NOTE: Skip properties that have been overridden in a subclass.
+                    continue;
+                }
 
-                continue;
-            }
+                propertySymbolsByName[member.Name] = member;
 
-            var parserAttribute = member.GetAttributes().FirstOrDefault(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliParserAttributeSymbol));
+                var argAttribute = member.GetAttributes().FirstOrDefault(a =>
+                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliArgumentAttributeSymbol));
 
-            var keyParserAttribute = member.GetAttributes().FirstOrDefault(a =>
-                SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliKeyParserAttributeSymbol));
+                var optAttribute = member.GetAttributes().FirstOrDefault(a =>
+                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliOptionAttributeSymbol));
 
-            string typeName = member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            ITypeSymbol valueTypeSymbol = member.Type;
-            ITypeSymbol? keyTypeSymbol = null;
-            bool isString = valueTypeSymbol.SpecialType == SpecialType.System_String;
-            bool isEnum = valueTypeSymbol.TypeKind == TypeKind.Enum;
-            bool isFlagsEnum = false;
-            bool isCollection = false;
-            CollectionType collectionType = CollectionType.None;
-            bool isDictionary = false;
+                if (argAttribute == null && optAttribute == null)
+                {
+                    // NOTE: Property is not decorated as a CLI option or argument and should therfore be skipped.
+                    continue;
+                }
 
-            if (!isString && TryGetEnumerableElementType(member.Type, simpleCliContext, out var elementType))
-            {
-                if (elementType is null)
+                if (argAttribute != null && optAttribute != null)
                 {
                     diagnostics.Add(Diagnostic.Create(
-                        DiagnosticDescriptors.UnsupportedCollectionElementType,
+                        DiagnosticDescriptors.AmbiguousCliPropertyBinding,
                         member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
                         member.Name));
 
                     continue;
                 }
-                else if (TryGetKeyValueTypeArgs(elementType, simpleCliContext, out keyTypeSymbol, out var foundValueType))
+
+                var parserAttribute = member.GetAttributes().FirstOrDefault(a =>
+                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliParserAttributeSymbol));
+
+                var keyParserAttribute = member.GetAttributes().FirstOrDefault(a =>
+                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliKeyParserAttributeSymbol));
+
+                string typeName = member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                ITypeSymbol valueTypeSymbol = member.Type;
+                ITypeSymbol? keyTypeSymbol = null;
+                bool isString = valueTypeSymbol.SpecialType == SpecialType.System_String;
+                bool isEnum = valueTypeSymbol.TypeKind == TypeKind.Enum;
+                bool isFlagsEnum = false;
+                bool isCollection = false;
+                CollectionType collectionType = CollectionType.None;
+                bool isDictionary = false;
+
+                if (!isString && TryGetEnumerableElementType(member.Type, simpleCliContext, out var elementType))
                 {
-                    if (TryGetCollectionType(member.Type, keyTypeSymbol!, foundValueType!, simpleCliContext, out collectionType))
-                    {
-                        valueTypeSymbol = foundValueType!;
-                        isDictionary = true;
-                    }
-                    else
+                    if (elementType is null)
                     {
                         diagnostics.Add(Diagnostic.Create(
-                            DiagnosticDescriptors.UnsupportedCollectionType,
+                            DiagnosticDescriptors.UnsupportedCollectionElementType,
                             member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
-                            typeName,
                             member.Name));
 
                         continue;
                     }
-                }
-                else
-                {
-                    if (TryGetCollectionType(member.Type, elementType, simpleCliContext, out collectionType))
+                    else if (TryGetKeyValueTypeArgs(elementType, simpleCliContext, out keyTypeSymbol, out var foundValueType))
                     {
-                        valueTypeSymbol = elementType;
-                        isCollection = true;
+                        if (TryGetCollectionType(member.Type, keyTypeSymbol!, foundValueType!, simpleCliContext, out collectionType))
+                        {
+                            valueTypeSymbol = foundValueType!;
+                            isDictionary = true;
+                        }
+                        else
+                        {
+                            diagnostics.Add(Diagnostic.Create(
+                                DiagnosticDescriptors.UnsupportedCollectionType,
+                                member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                                typeName,
+                                member.Name));
+
+                            continue;
+                        }
                     }
                     else
                     {
-                        diagnostics.Add(Diagnostic.Create(
-                            DiagnosticDescriptors.UnsupportedCollectionType,
-                            member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
-                            typeName,
-                            member.Name));
+                        if (TryGetCollectionType(member.Type, elementType, simpleCliContext, out collectionType))
+                        {
+                            valueTypeSymbol = elementType;
+                            isCollection = true;
+                        }
+                        else
+                        {
+                            diagnostics.Add(Diagnostic.Create(
+                                DiagnosticDescriptors.UnsupportedCollectionType,
+                                member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                                typeName,
+                                member.Name));
 
-                        continue;
+                            continue;
+                        }
                     }
                 }
-            }
 
-            string valueTypeName = valueTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            string? keyTypeName = keyTypeSymbol?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            string valueParserMethodName = string.Empty;
-            string? keyParserMethodName = string.Empty;
-            bool valueHasValidParser = false;
-            bool keyHasValidParser = false;
-            bool valueHasErrorMessageOut = false;
-            bool keyHasErrorMessageOut = false;
+                string valueTypeName = valueTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                string? keyTypeName = keyTypeSymbol?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                string valueParserMethodName = string.Empty;
+                string? keyParserMethodName = string.Empty;
+                bool valueHasValidParser = false;
+                bool keyHasValidParser = false;
+                bool valueHasErrorMessageOut = false;
+                bool keyHasErrorMessageOut = false;
 
-            if (parserAttribute != null)
-            {
-                if (parserAttribute.ConstructorArguments.Length == 2
-                    &&
-                    parserAttribute.ConstructorArguments[0].Value is INamedTypeSymbol customParserTypeSymbol
-                    &&
-                    parserAttribute.ConstructorArguments[1].Value is string customParserMethodName)
+                if (parserAttribute != null)
                 {
-                    string customParserTypeName = customParserTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-
-                    (valueHasValidParser, valueHasErrorMessageOut) = InspectParserSignature(customParserTypeSymbol, customParserMethodName);
-                    valueParserMethodName = $"{customParserTypeName}.{customParserMethodName}";
-                }
-            }
-            else if (isEnum)
-            {
-                valueHasValidParser = true;
-                isFlagsEnum = valueTypeSymbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliFlagsAttributeSymbol));
-            }
-            else if (valueTypeSymbol.SpecialType == SpecialType.System_String) // NOTE: valueTypeSymbol may have changed after first isString check.
-            {
-                valueHasValidParser = true;
-                valueHasErrorMessageOut = false;
-            }
-            else
-            {
-                (valueHasValidParser, valueHasErrorMessageOut) = InspectParserSignature(valueTypeSymbol, DefaultParserMethodName);
-                valueParserMethodName = $"{valueTypeName}.{DefaultParserMethodName}";
-            }
-
-            if (!isEnum && !isString && isDictionary)
-            {
-                if (keyParserAttribute != null)
-                {
-                    if (keyParserAttribute.ConstructorArguments.Length == 2
+                    if (parserAttribute.ConstructorArguments.Length == 2
                         &&
-                        keyParserAttribute.ConstructorArguments[0].Value is INamedTypeSymbol customParserTypeSymbol
+                        parserAttribute.ConstructorArguments[0].Value is INamedTypeSymbol customParserTypeSymbol
                         &&
-                        keyParserAttribute.ConstructorArguments[1].Value is string customParserMethodName)
+                        parserAttribute.ConstructorArguments[1].Value is string customParserMethodName)
                     {
                         string customParserTypeName = customParserTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
-                        (keyHasValidParser, keyHasErrorMessageOut) = InspectParserSignature(customParserTypeSymbol, customParserMethodName);
-                        keyParserMethodName = $"{customParserTypeName}.{customParserMethodName}";
+                        (valueHasValidParser, valueHasErrorMessageOut) = InspectParserSignature(customParserTypeSymbol, customParserMethodName);
+                        valueParserMethodName = $"{customParserTypeName}.{customParserMethodName}";
                     }
                 }
-                else if (keyTypeSymbol!.SpecialType == SpecialType.System_String)
+                else if (isEnum)
                 {
-                    keyHasValidParser = true;
-                    keyHasErrorMessageOut = false;
+                    valueHasValidParser = true;
+                    isFlagsEnum = valueTypeSymbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliFlagsAttributeSymbol));
+                }
+                else if (valueTypeSymbol.SpecialType == SpecialType.System_String) // NOTE: valueTypeSymbol may have changed after first isString check.
+                {
+                    valueHasValidParser = true;
+                    valueHasErrorMessageOut = false;
                 }
                 else
                 {
-                    (keyHasValidParser, keyHasErrorMessageOut) = InspectParserSignature(keyTypeSymbol!, DefaultParserMethodName);
-                    keyParserMethodName = $"{keyTypeName}.{DefaultParserMethodName}";
+                    (valueHasValidParser, valueHasErrorMessageOut) = InspectParserSignature(valueTypeSymbol, DefaultParserMethodName);
+                    valueParserMethodName = $"{valueTypeName}.{DefaultParserMethodName}";
                 }
-            }
 
-            if (!valueHasValidParser)
-            {
-                diagnostics.Add(Diagnostic.Create(
-                    DiagnosticDescriptors.MissingParser,
-                    member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
-                    valueTypeName,
-                    member.Name));
+                if (!isEnum && !isString && isDictionary)
+                {
+                    if (keyParserAttribute != null)
+                    {
+                        if (keyParserAttribute.ConstructorArguments.Length == 2
+                            &&
+                            keyParserAttribute.ConstructorArguments[0].Value is INamedTypeSymbol customParserTypeSymbol
+                            &&
+                            keyParserAttribute.ConstructorArguments[1].Value is string customParserMethodName)
+                        {
+                            string customParserTypeName = customParserTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
-                continue;
-            }
+                            (keyHasValidParser, keyHasErrorMessageOut) = InspectParserSignature(customParserTypeSymbol, customParserMethodName);
+                            keyParserMethodName = $"{customParserTypeName}.{customParserMethodName}";
+                        }
+                    }
+                    else if (keyTypeSymbol!.SpecialType == SpecialType.System_String)
+                    {
+                        keyHasValidParser = true;
+                        keyHasErrorMessageOut = false;
+                    }
+                    else
+                    {
+                        (keyHasValidParser, keyHasErrorMessageOut) = InspectParserSignature(keyTypeSymbol!, DefaultParserMethodName);
+                        keyParserMethodName = $"{keyTypeName}.{DefaultParserMethodName}";
+                    }
+                }
 
-            if (!keyHasValidParser && isDictionary)
-            {
-                diagnostics.Add(Diagnostic.Create(
-                    DiagnosticDescriptors.MissingParser,
-                    member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
-                    keyTypeName,
-                    member.Name));
+                if (!valueHasValidParser)
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        DiagnosticDescriptors.MissingParser,
+                        member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                        valueTypeName,
+                        member.Name));
 
-                continue;
-            }
+                    continue;
+                }
 
-            string? defaultValueString = null;
-            var syntaxReference = member.DeclaringSyntaxReferences.FirstOrDefault();
-            if (syntaxReference != null)
-            {
-                var syntaxNode = syntaxReference.GetSyntax();
-                if (syntaxNode is PropertyDeclarationSyntax propertySyntax
+                if (!keyHasValidParser && isDictionary)
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        DiagnosticDescriptors.MissingParser,
+                        member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                        keyTypeName,
+                        member.Name));
+
+                    continue;
+                }
+
+                string? defaultValueString = null;
+                var syntaxReference = member.DeclaringSyntaxReferences.FirstOrDefault();
+                if (syntaxReference != null)
+                {
+                    var syntaxNode = syntaxReference.GetSyntax();
+                    if (syntaxNode is PropertyDeclarationSyntax propertySyntax
+                        &&
+                        propertySyntax.Initializer != null)
+                    {
+                        defaultValueString = propertySyntax.Initializer.Value.ToString();
+                    }
+                }
+
+                if (argAttribute != null
                     &&
-                    propertySyntax.Initializer != null)
+                    argAttribute.ConstructorArguments.Length > 0
+                    &&
+                    argAttribute.ConstructorArguments[0].Value is int position)
                 {
-                    defaultValueString = propertySyntax.Initializer.Value.ToString();
+                    var descriptionArg = argAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Description");
+                    var description = descriptionArg.Value.Value is string d ? d : string.Empty;
+
+                    properties.Add(new ArgumentPropertyModel(
+                        Name: member.Name,
+                        TypeName: typeName,
+                        ValueTypeName: valueTypeName,
+                        SpecialType: valueTypeSymbol.SpecialType,
+                        IsRequired: member.IsRequired,
+                        Description: description,
+                        ValueParseMethodName: valueParserMethodName,
+                        ValueHasErrorMessageOut: valueHasErrorMessageOut,
+                        Position: position,
+                        IsEnum: isEnum));
+                }
+                else if (optAttribute != null
+                    &&
+                    optAttribute.ConstructorArguments.Length > 0
+                    &&
+                    optAttribute.ConstructorArguments[0].Value is string optName)
+                {
+                    var shortArg = optAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Short");
+                    char? shortName = shortArg.Value.Value is char c && c != '\0' ? c : null;
+
+                    if (string.Equals(optName, "help", StringComparison.OrdinalIgnoreCase))
+                    {
+                        diagnostics.Add(Diagnostic.Create(
+                            DiagnosticDescriptors.ReservedHelpOption,
+                            member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                            member.Name,
+                            "--help"));
+                    }
+
+                    if (shortName == 'h')
+                    {
+                        diagnostics.Add(Diagnostic.Create(
+                            DiagnosticDescriptors.ReservedHelpOption,
+                            member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
+                            member.Name,
+                            "-h"));
+                    }
+
+                    var descriptionArg = optAttribute.NamedArguments.FirstOrDefault(x => x.Key == "Description");
+                    var description = descriptionArg.Value.Value is string d ? d : string.Empty;
+
+                    var hiddenArg = optAttribute.NamedArguments.FirstOrDefault(x => x.Key == "Hidden");
+                    var hidden = hiddenArg.Value.Value is bool h && h;
+
+                    properties.Add(new OptionPropertyModel(
+                        Name: member.Name,
+                        TypeName: typeName,
+                        ValueTypeName: valueTypeName,
+                        KeyTypeName: keyTypeName,
+                        SpecialType: valueTypeSymbol.SpecialType,
+                        IsRequired: member.IsRequired,
+                        Description: description,
+                        ValueParseMethodName: valueParserMethodName,
+                        ValueHasErrorMessageOut: valueHasErrorMessageOut,
+                        KeyParseMethodName: keyParserMethodName,
+                        KeyHasErrorMessageOut: keyHasErrorMessageOut,
+                        DefaultValueString: defaultValueString,
+                        OptionName: optName,
+                        ShortName: shortName,
+                        IsCollection: isCollection,
+                        CollectionType: collectionType,
+                        IsDictionary: isDictionary,
+                        IsEnum: isEnum,
+                        IsFlagsEnum: isFlagsEnum,
+                        Hidden: hidden));
                 }
             }
 
-            if (argAttribute != null
-                &&
-                argAttribute.ConstructorArguments.Length > 0
-                &&
-                argAttribute.ConstructorArguments[0].Value is int position)
-            {
-                var descriptionArg = argAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Description");
-                var description = descriptionArg.Value.Value is string d ? d : string.Empty;
-
-                properties.Add(new ArgumentPropertyModel(
-                    Name: member.Name,
-                    TypeName: typeName,
-                    ValueTypeName: valueTypeName,
-                    SpecialType: valueTypeSymbol.SpecialType,
-                    IsRequired: member.IsRequired,
-                    Description: description,
-                    ValueParseMethodName: valueParserMethodName,
-                    ValueHasErrorMessageOut: valueHasErrorMessageOut,
-                    Position: position,
-                    IsEnum: isEnum));
-            }
-            else if (optAttribute != null
-                &&
-                optAttribute.ConstructorArguments.Length > 0
-                &&
-                optAttribute.ConstructorArguments[0].Value is string optName)
-            {
-                var shortArg = optAttribute.NamedArguments.FirstOrDefault(na => na.Key == "Short");
-                char? shortName = shortArg.Value.Value is char c && c != '\0' ? c : null;
-
-                if (string.Equals(optName, "help", StringComparison.OrdinalIgnoreCase))
-                {
-                    diagnostics.Add(Diagnostic.Create(
-                        DiagnosticDescriptors.ReservedHelpOption,
-                        member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
-                        member.Name,
-                        "--help"));
-                }
-
-                if (shortName == 'h')
-                {
-                    diagnostics.Add(Diagnostic.Create(
-                        DiagnosticDescriptors.ReservedHelpOption,
-                        member.Locations.FirstOrDefault() ?? classDecl.Identifier.GetLocation(),
-                        member.Name,
-                        "-h"));
-                }
-
-                var descriptionArg = optAttribute.NamedArguments.FirstOrDefault(x => x.Key == "Description");
-                var description = descriptionArg.Value.Value is string d ? d : string.Empty;
-
-                var hiddenArg = optAttribute.NamedArguments.FirstOrDefault(x => x.Key == "Hidden");
-                var hidden = hiddenArg.Value.Value is bool h && h;
-
-                properties.Add(new OptionPropertyModel(
-                    Name: member.Name,
-                    TypeName: typeName,
-                    ValueTypeName: valueTypeName,
-                    KeyTypeName: keyTypeName,
-                    SpecialType: valueTypeSymbol.SpecialType,
-                    IsRequired: member.IsRequired,
-                    Description: description,
-                    ValueParseMethodName: valueParserMethodName,
-                    ValueHasErrorMessageOut: valueHasErrorMessageOut,
-                    KeyParseMethodName: keyParserMethodName,
-                    KeyHasErrorMessageOut: keyHasErrorMessageOut,
-                    DefaultValueString: defaultValueString,
-                    OptionName: optName,
-                    ShortName: shortName,
-                    IsCollection: isCollection,
-                    CollectionType: collectionType,
-                    IsDictionary: isDictionary,
-                    IsEnum: isEnum,
-                    IsFlagsEnum: isFlagsEnum,
-                    Hidden: hidden));
-            }
+            currentClassSymbol = currentClassSymbol.BaseType;
         }
-
-        var propertySymbolsByName = classSymbol.GetMembers()
-            .OfType<IPropertySymbol>()
-            .ToDictionary(p => p.Name, p => p);
 
         Location GetLocation(string propertyName) =>
             propertySymbolsByName.TryGetValue(propertyName, out var p)

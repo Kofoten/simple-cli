@@ -10,7 +10,23 @@ This library is designed to be incredibly easy to use and requires minimal effor
 
 There is no declarative validation. However you can implement a method named `Validate` which takes no parameters and returns a `CliValidationResult` to add validation such as ensuring strings match a specific regex or an integer falls in a specified interval. This method **may not** be abstract, async or static and **must** be public or internal. This method is called after instantiating the command, however if a failure is returned it is treated as a parsing failure and will invoke the exception handler with a `CliParseException` or throw if the `Parse` method was called directly without using the `CliCommandBuilder`.
 
+### Inheritance
+
+The source generator will traverse the inheritance tree and find all arguments and options as well as any validation method implemented in any base class.
+
 ### Example implementation
+
+BaseCommand.cs
+
+```c#
+public abstract class BaseCommand : ICliCommand
+{
+    [CliOption("verbose", Short = 'V', Description = "Print the result of each addition.")]
+    public bool Verbose { get; init; } = false;
+
+    public abstract int Execute();
+}
+```
 
 AdditionCommand.cs
 
@@ -18,7 +34,7 @@ AdditionCommand.cs
 /// <summary>
 /// Adds numbers together and prints the result.
 /// </summary>
-public class AdditionCommand(object imaginaryService) : ICliCommand
+public class AdditionCommand(object imaginaryService) : BaseCommand
 {
     [CliArgument(0, nameof(FirstNumber), Description = "The first number to add.")]
     public required int FirstNumber { get; init; }
@@ -28,9 +44,6 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
 
     [CliOption("additional-numbers", Short = 'a', Description = "Additional numbers to add.")]
     public int[] AdditionalNumbers { get; init; } = [];
-
-    [CliOption("verbose", Short = 'V', Description = "Print the result of each addition.")]
-    public bool Verbose { get; init; } = false;
 
     public CliValidationResult Validate()
     {
@@ -42,7 +55,7 @@ public class AdditionCommand(object imaginaryService) : ICliCommand
         return new CliValidationResult.Success();
     }
 
-    public int Execute()
+    public override int Execute()
     {
         int[] allNumbers = [FirstNumber, SecondNumber, .. AdditionalNumbers];
         int sum = allNumbers[0];
@@ -295,7 +308,6 @@ There are some limitations in what kind of cli that can be designed. Some limita
 
 ### Will change (probably)
 
-- Inherited members from base classes are currently **not** detected or mapped by the source generator. The CLI properties (arguments/options) and the `Validate()` method must be declared directly on the target command class.
 - Improved help text (include application name and version)
 
 ## Analyzer diagnostic codes
