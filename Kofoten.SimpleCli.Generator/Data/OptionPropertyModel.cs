@@ -26,7 +26,8 @@ internal record OptionPropertyModel(
     string[] AllowedValueStrings,
     string OptionName,
     char? ShortName,
-    bool Hidden
+    bool Hidden,
+    string? ImplicitValueString
 ) : PropertyModel(
     Name,
     TypeName,

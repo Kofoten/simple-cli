@@ -1,6 +1,7 @@
 ﻿using Kofoten.SimpleCli.Generator.Data;
 using Kofoten.SimpleCli.Generator.Diagnostics;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System;
 using System.Collections.Generic;
@@ -517,6 +518,14 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     var hiddenArg = optAttribute.NamedArguments.FirstOrDefault(x => x.Key == "Hidden");
                     var hidden = hiddenArg.Value.Value is bool h && h;
 
+                    var implicitValueArg = optAttribute.NamedArguments.FirstOrDefault(x => x.Key == "ImplicitValue");
+                    var implicitValue = implicitValueArg.Value.Value is string iv ? iv : null;
+
+                    if (implicitValue is not null && (isCollection || isDictionary))
+                    {
+                        // TODO: Emit diagnostic for implicit value assignment not supported for this property type.
+                    }
+
                     properties.Add(new OptionPropertyModel(
                         Name: member.Name,
                         TypeName: typeName,
@@ -541,7 +550,8 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         IsDictionary: isDictionary,
                         IsEnum: isEnum,
                         IsFlagsEnum: isFlagsEnum,
-                        Hidden: hidden));
+                        Hidden: hidden,
+                        ImplicitValueString: implicitValue));
                 }
             }
 
@@ -1150,8 +1160,6 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 var argumentNameLength = arguments.Max(a => a.Name.Length) + 4;
                 var optionNameLength = options.Max(o => o.OptionName.Length) + 4;
 
-                code.AppendLine($"private const global::System.Int32 RequiredArgumentCount = {arguments.Count(a => a.IsRequired)};");
-                code.AppendLine();
                 code.AppendLine("private const global::System.String HelpArgumentAndOptions = @\"");
                 if (arguments.Count != 0)
                 {
@@ -1335,6 +1343,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                         {
                                             code.AppendLine($"opt_{opt.Name} = true;");
                                         }
+                                        else if (opt.ImplicitValueString is not null)
+                                        {
+                                            GenerateImplicitValueAssignment(code, opt.ImplicitValueString, opt);
+                                        }
                                         code.AppendLine("continue;");
                                     }
                                 }
@@ -1407,10 +1419,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         }
                     }
 
-                    code.AppendLine("if (argIndex < RequiredArgumentCount)");
+                    code.AppendLine($"if (argIndex < {arguments.Count})");
                     using (code.StartBlock())
                     {
-                        code.AppendLine("errors.Add($\"Too few arguments: At least {RequiredArgumentCount} argumeny(s) are required\");");
+                        code.AppendLine($"errors.Add($\"Too few arguments: At least {arguments.Count} argument(s) are required\");");
                     }
 
                     code.AppendLine();
@@ -1934,6 +1946,57 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
                 break;
             default:
+                break;
+        }
+    }
+
+    private static void GenerateImplicitValueAssignment(CodeBuilder code, string implicitValueString, OptionPropertyModel model)
+    {
+        switch (model.ValueSpecialType)
+        {
+            case SpecialType.System_String:
+                code.AppendLine($"opt_{model.Name} = {SymbolDisplay.FormatLiteral(implicitValueString, quote: true)};");
+                break;
+            case SpecialType.System_Char:
+                char charVal = implicitValueString.Length > 0 ? implicitValueString[0] : '\0';
+                code.AppendLine($"opt_{model.Name} = {SymbolDisplay.FormatLiteral(charVal, quote: true)};");
+                break;
+            case SpecialType.System_Boolean:
+                code.AppendLine($"opt_{model.Name} = {implicitValueString.ToLowerInvariant()};");
+                break;
+            case SpecialType.System_Decimal:
+                code.AppendLine($"opt_{model.Name} = {implicitValueString}m;");
+                break;
+            case SpecialType.System_Single:
+                code.AppendLine($"opt_{model.Name} = {implicitValueString}f;");
+                break;
+            case SpecialType.System_Byte:
+            case SpecialType.System_Double:
+            case SpecialType.System_Int16:
+            case SpecialType.System_Int32:
+            case SpecialType.System_Int64:
+                code.AppendLine($"opt_{model.Name} = {implicitValueString};");
+                break;
+            default:
+                using (code.StartBlock())
+                {
+                    if (model.ValueHasErrorMessageOut)
+                    {
+                        code.AppendLine($"if (!{model.ValueParseMethodName}(\"{implicitValueString}\", out opt_{model.Name}, out global::System.String customError))");
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine($"errors.Add($\"Failed to parse option '--{model.OptionName}': {{customError}}\");");
+                        }
+                    }
+                    else
+                    {
+                        code.AppendLine($"if (!{model.ValueParseMethodName}(\"{implicitValueString}\", out opt_{model.Name}))");
+                        using (code.StartBlock())
+                        {
+                            code.AppendLine($"errors.Add(\"Invalid {model.ValueTypeName} value ('{implicitValueString}') for option '--{model.OptionName}'.\");");
+                        }
+                    }
+                }
                 break;
         }
     }

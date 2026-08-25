@@ -29,7 +29,7 @@ internal class AdditionCommand(object imaginaryService) : BaseCommand
     [CliOption("cheese", Description = "Eats the specified cheese", Hidden = true)]
     public Cheese Cheese { get; init; } = new Cheese("Västerbotten", "Sweden");
 
-    [CliOption("limit", Short = 'l', Description = "Sets a limit")]
+    [CliOption("limit", Short = 'l', Description = "Sets a limit", ImplicitValue = "1")]
     [CliParser(typeof(CliParsers), nameof(CliParsers.TryParseLimit))]
     public int Limit { get; init; } = 5;
 

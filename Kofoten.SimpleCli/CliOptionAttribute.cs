@@ -29,4 +29,9 @@ public sealed class CliOptionAttribute(string name) : Attribute
     /// Indicates if this option should be hidden from the help page.
     /// </summary>
     public bool Hidden { get; set; }
+
+    /// <summary>
+    /// The implicit value of the option (used when the option is provided without a value).
+    /// </summary>
+    public string? ImplicitValue { get; set; }
 }
