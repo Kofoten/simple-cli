@@ -1,6 +1,6 @@
-# Kofoten.SimpleCli
+# Kofoten.NativeCli
 
-This cli library was built because I could not find anything out there which had exactly what I wanted and the developer experience I wanted. I wanted super simple DX with full support for NativeAOT and seamless integration with dependency injection (using `Kofoten.SimpleCli.DependencyInjection`). I built this specifically to solve cli parsing, nothing else. I did not want to have a super generic do it all cli tool with all the fancy features. This cli library is therefore highly opinionated and is extremely simple to use.
+This cli library was built because I could not find anything out there which had exactly what I wanted and the developer experience I wanted. I wanted super simple DX with full support for NativeAOT and seamless integration with dependency injection (using `Kofoten.NativeCli.DependencyInjection`). I built this specifically to solve cli parsing, nothing else. I did not want to have a super generic do it all cli tool with all the fancy features. This cli library is therefore highly opinionated and is extremely simple to use.
 
 ## Usage
 
@@ -84,7 +84,7 @@ public class AdditionCommand(object imaginaryService) : BaseCommand
 Program.cs (single command app)
 
 ```c#
-using Kofoten.SimpleCli;
+using Kofoten.NativeCli;
 
 return AdditionCommandParser.Parse(args, new()).Execute();
 ```
@@ -92,7 +92,7 @@ return AdditionCommandParser.Parse(args, new()).Execute();
 Program.cs (with subcommand routing)
 
 ```c#
-using Kofoten.SimpleCli;
+using Kofoten.NativeCli;
 
 var builder = CliCommandBuilder.Configure(router =>
 {
@@ -133,8 +133,8 @@ static int ExceptionHandler(Exception exception, IServiceProvider? _)
 Program.cs (using dependency injection)
 
 ```c#
-using Kofoten.SimpleCli;
-using Kofoten.SimpleCli.DependencyInjection;
+using Kofoten.NativeCli;
+using Kofoten.NativeCli.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 
 return new ServiceCollection()
@@ -193,6 +193,26 @@ There are two possible signatures that can be used:
 - `public static bool TryParse(string s, out T value, out string error)`
 
 Implement the second version if you want to provide a specific error message to the user.
+
+### Implicit values
+
+Any single value **option** can have an implicit value. This value is automatically assigned if the user passes the option flag without providing an explicit value next to it.
+
+Note: This is different from a standard default value, which is applied when the user omits the option entirely.
+
+You can configure this by providing the value's string representation to the `ImplicitValue` property on the `[CliOption]` attribute.
+
+This is incredibly useful for opt-in features like a `--porcelain` flag, where you want to enable a specific behavior but don't want to force the user to type out the exact version unless they need to. In the example below, running `myapp --porcelain` will be treated exactly as if the user had typed `myapp --porcelain v1`. If the flag is omitted entirely, the property will retain its default value (`null` in this case).
+
+```c#
+[CliOption("porcelain", Description = "Prints the output in a machine-readable format", ImplicitValue = "v1")]
+public string? PorcelainVersion { get; init; }
+```
+
+- `myapp --porcelain v2` $\rightarrow$ `PorcelainVersion` is "v2"
+- `myapp --porcelain v1` $\rightarrow$ `PorcelainVersion` is "v1" (Explicit)
+- `myapp --porcelain` $\rightarrow$ `PorcelainVersion` is "v1" (Implicit)
+- `myapp` $\rightarrow$ `PorcelainVersion` is null (Default)
 
 #### Custom parsing
 
@@ -315,18 +335,18 @@ There are some limitations in what kind of cli that can be designed. Some limita
 
 ## Analyzer diagnostic codes
 
-To ensure a smooth developer experience, `Kofoten.SimpleCli` includes a Roslyn analyzer that catches configuration errors at compile time.
+To ensure a smooth developer experience, `Kofoten.NativeCli` includes a Roslyn analyzer that catches configuration errors at compile time.
 
 | Code | Title | Description | Severity |
 | :--- | :--- | :--- | :--- |
-| **SCLI001** | Invalid constructor count | The command class must declare exactly one public constructor to be CLI-parsable. | Error |
-| **SCLI002** | Unsupported collection type | A property is using a collection type whose element type could not be resolved by the generator. | Error |
-| **SCLI003** | Duplicate argument position | Multiple properties are marked with `[CliArgument]` using the same positional index. | Error |
-| **SCLI004** | Duplicate option name | Multiple properties are marked with `[CliOption]` using the same name. | Error |
-| **SCLI005** | Duplicate short option | Multiple properties are marked with `[CliOption]` using the same short character (e.g., `-a`). | Error |
-| **SCLI006** | Reserved option name | A property attempted to use `-h` or `--help`, which are strictly reserved by the CLI router for displaying help text. | Error |
-| **SCLI007** | Unsupported collection type | A property is using a collection type that is not supported by the generator. | Error |
-| **SCLI008** | Ambiguous CLI property binding | A property is marked with both `[CliArgument]` and `[CliOption]`, which is not allowed. | Error |
-| **SCLI009** | Missing parser | The type of a CLI property does not have a valid parser (e.g., no compatible `TryParse` method or `[CliParser]` attribute). | Error |
-| **SCLI010** | Invalid command accessibility | The command class must be declared as public or internal. | Error |
-| **SCLI011** | Redundant default value | A required argument or option property should not have a default value assigned. | Warning |
+| **NCLI001** | Invalid constructor count | The command class must declare exactly one public constructor to be CLI-parsable. | Error |
+| **NCLI002** | Unsupported collection type | A property is using a collection type whose element type could not be resolved by the generator. | Error |
+| **NCLI003** | Duplicate argument position | Multiple properties are marked with `[CliArgument]` using the same positional index. | Error |
+| **NCLI004** | Duplicate option name | Multiple properties are marked with `[CliOption]` using the same name. | Error |
+| **NCLI005** | Duplicate short option | Multiple properties are marked with `[CliOption]` using the same short character (e.g., `-a`). | Error |
+| **NCLI006** | Reserved option name | A property attempted to use `-h` or `--help`, which are strictly reserved by the CLI router for displaying help text. | Error |
+| **NCLI007** | Unsupported collection type | A property is using a collection type that is not supported by the generator. | Error |
+| **NCLI008** | Ambiguous CLI property binding | A property is marked with both `[CliArgument]` and `[CliOption]`, which is not allowed. | Error |
+| **NCLI009** | Missing parser | The type of a CLI property does not have a valid parser (e.g., no compatible `TryParse` method or `[CliParser]` attribute). | Error |
+| **NCLI010** | Invalid command accessibility | The command class must be declared as public or internal. | Error |
+| **NCLI011** | Redundant default value | A required argument or option property should not have a default value assigned. | Warning |

@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
+    <File Path="LICENSE" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/Solution Items/.github/" />
+  <Folder Name="/Solution Items/.github/workflows/">
+    <File Path=".github/workflows/release.yml" />
+    <File Path=".github/workflows/testing.yml" />
+  </Folder>
+  <Project Path="Kofoten.NativeCli.DependencyInjection/Kofoten.NativeCli.DependencyInjection.csproj" />
+  <Project Path="Kofoten.NativeCli.Generator/Kofoten.NativeCli.Generator.csproj" Id="0d4ab000-5240-4554-aa54-b7cb7fc46f7e" />
+  <Project Path="Kofoten.NativeCli.NetstandardTest/Kofoten.NativeCli.NetstandardTest.csproj" Id="2be04486-2c61-4f2a-b010-88e36bc71207" />
+  <Project Path="Kofoten.NativeCli.Test/Kofoten.NativeCli.Test.csproj" Id="aba9f1a7-2851-4b77-9cab-b091a0e013bf" />
+  <Project Path="Kofoten.NativeCli/Kofoten.NativeCli.csproj" />
+</Solution>

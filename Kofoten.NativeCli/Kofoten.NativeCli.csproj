@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0'))">true</IsAotCompatible>
+    <IsTrimmable Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0'))">true</IsTrimmable>
+    <IsPackable>true</IsPackable>
+    <PackageId>Kofoten.NativeCli</PackageId>
+    <Authors>Rasmus Steen</Authors>
+    <Description>A zero-dependency, allocation-friendly CLI parser powered by Roslyn Source Generators.</Description>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/Kofoten/simple-cli</PackageProjectUrl>
+	<RepositoryUrl>https://github.com/Kofoten/simple-cli</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" />
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kofoten.NativeCli.Generator\Kofoten.NativeCli.Generator.csproj" ReferenceOutputAssembly="false" OutputItemType="Analyzer" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\Kofoten.NativeCli.Generator\bin\$(Configuration)\netstandard2.0\Kofoten.NativeCli.Generator.dll" Pack="true" PackagePath="analyzers\dotnet\cs" Visible="false" />
+  </ItemGroup>
+</Project>
