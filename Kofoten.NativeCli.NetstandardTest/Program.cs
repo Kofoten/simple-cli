@@ -1,4 +1,5 @@
 ﻿using Kofoten.NativeCli;
+using Kofoten.NativeCli.NetstandardTest;
 using System;
 
 public class Program
