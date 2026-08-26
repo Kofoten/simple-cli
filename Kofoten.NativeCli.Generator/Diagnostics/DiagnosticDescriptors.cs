@@ -47,7 +47,7 @@ namespace Kofoten.NativeCli.Generator.Diagnostics
         public static readonly DiagnosticDescriptor ReservedHelpOption = new(
             id: "NCLI006",
             title: "Reserved CLI option",
-            messageFormat: "Property '{0}' uses a reserved help option ('{1}'). '-h' and '--help' are reserved by the simple-cli router.",
+            messageFormat: "Property '{0}' uses a reserved help option ('{1}'). '-h' and '--help' are reserved by the native-cli router.",
             category: "Kofoten.NativeCli.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
@@ -55,7 +55,7 @@ namespace Kofoten.NativeCli.Generator.Diagnostics
         public static readonly DiagnosticDescriptor UnsupportedCollectionType = new(
             id: "NCLI007",
             title: "Unsupported collection type",
-            messageFormat: "The type '{0}' of property '{1}' is not a supportd collection type. See https://github.com/Kofoten/simple-cli/blob/main/README.md#supported-property-types for more information.",
+            messageFormat: "The type '{0}' of property '{1}' is not a supportd collection type. See https://github.com/Kofoten/native-cli/blob/main/README.md#supported-property-types for more information.",
             category: "Kofoten.NativeCli.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);

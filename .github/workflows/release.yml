@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: simple-cli-arc-runner
+    runs-on: native-cli-arc-runner
 
     steps:
       - name: Checkout Code
@@ -43,14 +43,14 @@ jobs:
         run: dotnet build --no-restore -p:Version=${{ env.SEMVER }}
 
       - name: Run Tests
-        run: dotnet run --verbosity normal --project ./Kofoten.SimpleCli.Test/Kofoten.SimpleCli.Test.csproj -p:Version=${{ env.SEMVER }}
+        run: dotnet run --verbosity normal --project ./Kofoten.NativeCli.Test/Kofoten.NativeCli.Test.csproj -p:Version=${{ env.SEMVER }}
 
       - name: Pack NuGet Packages
         run: |
-          dotnet pack Kofoten.SimpleCli/Kofoten.SimpleCli.csproj -c Release -o ./nupkg -p:Version=${{ env.SEMVER }}
-          dotnet pack Kofoten.SimpleCli.DependencyInjection/Kofoten.SimpleCli.DependencyInjection.csproj -c Release -o ./nupkg -p:Version=${{ env.SEMVER }}
+          dotnet pack Kofoten.NativeCli/Kofoten.NativeCli.csproj -c Release -o ./nupkg -p:Version=${{ env.SEMVER }}
+          dotnet pack Kofoten.NativeCli.DependencyInjection/Kofoten.NativeCli.DependencyInjection.csproj -c Release -o ./nupkg -p:Version=${{ env.SEMVER }}
 
-      - name: Publish Kofoten.SimpleCli to NuGet
+      - name: Publish Kofoten.NativeCli to NuGet
         run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ steps.nuget_login.outputs.NUGET_API_KEY }} --skip-duplicate
 
       - name: Create GitHub Release
@@ -60,6 +60,6 @@ jobs:
           name: Release ${{ env.VERSION }}
           body: |
             **NuGet Packages**:
-            - [Kofoten.SimpleCli ${{ env.SEMVER }}](https://www.nuget.org/packages/Kofoten.SimpleCli/${{ env.SEMVER }})
-            - [Kofoten.SimpleCli.DependencyInjection ${{ env.SEMVER }}](https://www.nuget.org/packages/Kofoten.SimpleCli.DependencyInjection/${{ env.SEMVER }})
+            - [Kofoten.NativeCli ${{ env.SEMVER }}](https://www.nuget.org/packages/Kofoten.NativeCli/${{ env.SEMVER }})
+            - [Kofoten.NativeCli.DependencyInjection ${{ env.SEMVER }}](https://www.nuget.org/packages/Kofoten.NativeCli.DependencyInjection/${{ env.SEMVER }})
           generate_release_notes: true

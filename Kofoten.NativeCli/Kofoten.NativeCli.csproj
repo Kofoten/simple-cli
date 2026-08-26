@@ -12,8 +12,8 @@
     <Description>A zero-dependency, allocation-friendly CLI parser powered by Roslyn Source Generators.</Description>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/Kofoten/simple-cli</PackageProjectUrl>
-	<RepositoryUrl>https://github.com/Kofoten/simple-cli</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/Kofoten/native-cli</PackageProjectUrl>
+	<RepositoryUrl>https://github.com/Kofoten/native-cli</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 

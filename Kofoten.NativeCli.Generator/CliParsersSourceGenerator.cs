@@ -23,7 +23,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 predicate: static (s, _) => s is ClassDeclarationSyntax c && c.BaseList is not null,
                 transform: static (ctx, _) => (ClassDeclarationSyntax)ctx.Node);
 
-        var simpleCliCompilationContextProvider = context.CompilationProvider.Select(static (compilation, _) =>
+        var nativeCliCompilationContextProvider = context.CompilationProvider.Select(static (compilation, _) =>
         {
             var serviceProviderSymbol = compilation.GetTypeByMetadataName("System.IServiceProvider");
             var getRequiredServiceExtensionsSymbol = compilation.GetTypeByMetadataName("Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions");
@@ -79,7 +79,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 supportedDictionaryOfKVInterfaces.Add(iReadOnlyDictionaryOfKV);
             }
 
-            return new SimpleCliCompilationContext(
+            return new NativeCliCompilationContext(
                 CliParsableSymbol: compilation.GetTypeByMetadataName("Kofoten.NativeCli.ICliParsable"),
                 CliValidationResultSymbol: compilation.GetTypeByMetadataName("Kofoten.NativeCli.CliValidationResult"),
                 CliArgumentAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.NativeCli.CliArgumentAttribute"),
@@ -104,17 +104,17 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
         var combinedProvider = classDeclarations
             .Combine(context.CompilationProvider)
-            .Combine(simpleCliCompilationContextProvider);
+            .Combine(nativeCliCompilationContextProvider);
 
         var commandModels = combinedProvider.Select(static (source, _) =>
         {
             var classDecl = source.Left.Left;
             var compilation = source.Left.Right;
-            var simpleCliContext = source.Right;
+            var nativeCliContext = source.Right;
 
             var semanticModel = compilation.GetSemanticModel(classDecl.SyntaxTree);
 
-            return GetCommandTarget(classDecl, semanticModel, simpleCliContext);
+            return GetCommandTarget(classDecl, semanticModel, nativeCliContext);
         });
 
         context.RegisterSourceOutput(commandModels, static (spc, result) =>
@@ -133,7 +133,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
     #region BuildCommandModel
 
-    private static CommandGenerationResult GetCommandTarget(ClassDeclarationSyntax classDecl, SemanticModel semanticModel, SimpleCliCompilationContext simpleCliContext)
+    private static CommandGenerationResult GetCommandTarget(ClassDeclarationSyntax classDecl, SemanticModel semanticModel, NativeCliCompilationContext nativeCliContext)
     {
         //#if DEBUG
         //        if (!global::System.Diagnostics.Debugger.IsAttached)
@@ -159,7 +159,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         var compilation = semanticModel.Compilation;
 
         var inheritsCommand = classSymbol.AllInterfaces.Any(interfaceSymbol =>
-            SymbolEqualityComparer.Default.Equals(interfaceSymbol, simpleCliContext.CliParsableSymbol));
+            SymbolEqualityComparer.Default.Equals(interfaceSymbol, nativeCliContext.CliParsableSymbol));
 
         if (!inheritsCommand)
         {
@@ -217,7 +217,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     .Where(m => !m.IsAbstract && !m.IsStatic && !m.IsAsync)
                     .Where(m => m.Parameters.Length == 0)
                     .Where(m => m.DeclaredAccessibility == Accessibility.Public || m.DeclaredAccessibility == Accessibility.Internal)
-                    .Any(m => SymbolEqualityComparer.Default.Equals(m.ReturnType, simpleCliContext.CliValidationResultSymbol));
+                    .Any(m => SymbolEqualityComparer.Default.Equals(m.ReturnType, nativeCliContext.CliValidationResultSymbol));
             }
 
             foreach (var member in currentClassSymbol.GetMembers().OfType<IPropertySymbol>())
@@ -231,10 +231,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 propertySymbolsByName[member.Name] = member;
 
                 var argAttribute = member.GetAttributes().FirstOrDefault(a =>
-                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliArgumentAttributeSymbol));
+                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, nativeCliContext.CliArgumentAttributeSymbol));
 
                 var optAttribute = member.GetAttributes().FirstOrDefault(a =>
-                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliOptionAttributeSymbol));
+                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, nativeCliContext.CliOptionAttributeSymbol));
 
                 if (argAttribute == null && optAttribute == null)
                 {
@@ -253,10 +253,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
 
                 var parserAttribute = member.GetAttributes().FirstOrDefault(a =>
-                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliParserAttributeSymbol));
+                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, nativeCliContext.CliParserAttributeSymbol));
 
                 var keyParserAttribute = member.GetAttributes().FirstOrDefault(a =>
-                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliKeyParserAttributeSymbol));
+                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, nativeCliContext.CliKeyParserAttributeSymbol));
 
                 string typeName = member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
                 ITypeSymbol valueTypeSymbol = member.Type;
@@ -268,7 +268,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 CollectionType collectionType = CollectionType.None;
                 bool isDictionary = false;
 
-                if (!isString && TryGetEnumerableElementType(member.Type, simpleCliContext, out var elementType))
+                if (!isString && TryGetEnumerableElementType(member.Type, nativeCliContext, out var elementType))
                 {
                     if (elementType is null)
                     {
@@ -279,9 +279,9 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
                         continue;
                     }
-                    else if (TryGetKeyValueTypeArgs(elementType, simpleCliContext, out keyTypeSymbol, out var foundValueType))
+                    else if (TryGetKeyValueTypeArgs(elementType, nativeCliContext, out keyTypeSymbol, out var foundValueType))
                     {
-                        if (TryGetCollectionType(member.Type, keyTypeSymbol!, foundValueType!, simpleCliContext, out collectionType))
+                        if (TryGetCollectionType(member.Type, keyTypeSymbol!, foundValueType!, nativeCliContext, out collectionType))
                         {
                             valueTypeSymbol = foundValueType!;
                             isDictionary = true;
@@ -299,7 +299,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
                     else
                     {
-                        if (TryGetCollectionType(member.Type, elementType, simpleCliContext, out collectionType))
+                        if (TryGetCollectionType(member.Type, elementType, nativeCliContext, out collectionType))
                         {
                             valueTypeSymbol = elementType;
                             isCollection = true;
@@ -343,7 +343,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 else if (isEnum)
                 {
                     valueHasValidParser = true;
-                    isFlagsEnum = valueTypeSymbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, simpleCliContext.CliFlagsAttributeSymbol));
+                    isFlagsEnum = valueTypeSymbol.GetAttributes().Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, nativeCliContext.CliFlagsAttributeSymbol));
                 }
                 else if (valueTypeSymbol.SpecialType == SpecialType.System_String) // NOTE: valueTypeSymbol may have changed after first isString check.
                 {
@@ -617,7 +617,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             Description: GetCommandDescription(classSymbol),
             ConstructorParameters: constructorParams,
             Properties: properties,
-            HasDependencyInjection: simpleCliContext.HasDependencyInjection,
+            HasDependencyInjection: nativeCliContext.HasDependencyInjection,
             HasValidationMethod: hasValidationMethod,
             Usings: usings);
 
@@ -626,19 +626,19 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
     private static bool TryGetEnumerableElementType(
         ITypeSymbol type,
-        SimpleCliCompilationContext simpleCliContext,
+        NativeCliCompilationContext nativeCliContext,
         out ITypeSymbol? elementType)
     {
         elementType = null;
 
-        if (simpleCliContext.EnumerableOfTSymbol is null)
+        if (nativeCliContext.EnumerableOfTSymbol is null)
         {
             return false;
         }
 
         if (type is INamedTypeSymbol named &&
             named.IsGenericType &&
-            SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, simpleCliContext.EnumerableOfTSymbol))
+            SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, nativeCliContext.EnumerableOfTSymbol))
         {
             elementType = named.TypeArguments[0];
             return true;
@@ -648,7 +648,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         {
             if (iface is INamedTypeSymbol i &&
                 i.IsGenericType &&
-                SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, simpleCliContext.EnumerableOfTSymbol))
+                SymbolEqualityComparer.Default.Equals(i.OriginalDefinition, nativeCliContext.EnumerableOfTSymbol))
             {
                 elementType = i.TypeArguments[0];
                 return true;
@@ -660,21 +660,21 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
     private static bool TryGetKeyValueTypeArgs(
         ITypeSymbol elementType,
-        SimpleCliCompilationContext simpleCliContext,
+        NativeCliCompilationContext nativeCliContext,
         out ITypeSymbol? keyType,
         out ITypeSymbol? valueType)
     {
         keyType = null;
         valueType = null;
 
-        if (simpleCliContext.KeyValuePairOfT2Symbol is null)
+        if (nativeCliContext.KeyValuePairOfT2Symbol is null)
         {
             return false;
         }
 
         if (elementType is INamedTypeSymbol named &&
             named.IsGenericType &&
-            SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, simpleCliContext.KeyValuePairOfT2Symbol))
+            SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, nativeCliContext.KeyValuePairOfT2Symbol))
         {
             keyType = named.TypeArguments[0];
             valueType = named.TypeArguments[1];
@@ -687,10 +687,10 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
     private static bool TryGetCollectionType(
         ITypeSymbol type,
         ITypeSymbol elementType,
-        SimpleCliCompilationContext simpleCliContext,
+        NativeCliCompilationContext nativeCliContext,
         out CollectionType collectionType)
     {
-        if (simpleCliContext.EnumerableOfTSymbol == null)
+        if (nativeCliContext.EnumerableOfTSymbol == null)
         {
             collectionType = CollectionType.None;
             return false;
@@ -704,43 +704,43 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
 
         if (type is INamedTypeSymbol named)
         {
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ListOfTSymbol?.Construct(elementType)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.ListOfTSymbol?.Construct(elementType)))
             {
                 collectionType = CollectionType.ListCompatible;
                 return true;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableArrayOfTSymbol?.Construct(elementType)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.ImmutableArrayOfTSymbol?.Construct(elementType)))
             {
                 collectionType = CollectionType.ImmutableArray;
                 return true;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableListOfTSymbol?.Construct(elementType)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.ImmutableListOfTSymbol?.Construct(elementType)))
             {
                 collectionType = CollectionType.ImmutableList;
                 return true;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableHashSetOfTSymbol?.Construct(elementType)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.ImmutableHashSetOfTSymbol?.Construct(elementType)))
             {
                 collectionType = CollectionType.ImmutableHashSet;
                 return true;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.FrozenSetOfTSymbol?.Construct(elementType)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.FrozenSetOfTSymbol?.Construct(elementType)))
             {
                 collectionType = CollectionType.FrozenSet;
                 return true;
             }
 
-            if (simpleCliContext.SupportedEnumerableOfTInterfaceSymbols.Any(s => SymbolEqualityComparer.Default.Equals(named, s.Construct(elementType))))
+            if (nativeCliContext.SupportedEnumerableOfTInterfaceSymbols.Any(s => SymbolEqualityComparer.Default.Equals(named, s.Construct(elementType))))
             {
                 collectionType = CollectionType.ListCompatible;
                 return true;
             }
 
-            var typedEnumerableSymbol = simpleCliContext.EnumerableOfTSymbol.Construct(elementType);
+            var typedEnumerableSymbol = nativeCliContext.EnumerableOfTSymbol.Construct(elementType);
             var constructor = named.InstanceConstructors.FirstOrDefault(c =>
                 c.DeclaredAccessibility == Accessibility.Public
                 &&
@@ -966,12 +966,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
         ITypeSymbol type,
         ITypeSymbol keyType,
         ITypeSymbol valueType,
-        SimpleCliCompilationContext simpleCliContext,
+        NativeCliCompilationContext nativeCliContext,
         out CollectionType collectionType)
     {
-        if (simpleCliContext.KeyValuePairOfT2Symbol == null
+        if (nativeCliContext.KeyValuePairOfT2Symbol == null
             ||
-            simpleCliContext.EnumerableOfTSymbol == null)
+            nativeCliContext.EnumerableOfTSymbol == null)
         {
             collectionType = CollectionType.None;
             return false;
@@ -983,70 +983,70 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             return true;
         }
 
-        var keyValuePairSymbol = simpleCliContext.KeyValuePairOfT2Symbol.Construct(keyType, valueType);
+        var keyValuePairSymbol = nativeCliContext.KeyValuePairOfT2Symbol.Construct(keyType, valueType);
         if (type is INamedTypeSymbol named)
         {
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.DictionaryOfKVSymbol?.Construct(keyType, valueType)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.DictionaryOfKVSymbol?.Construct(keyType, valueType)))
             {
                 collectionType = CollectionType.DictionaryCompatible;
                 return true;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableDictionaryOfKVSymbol?.Construct(keyType, valueType)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.ImmutableDictionaryOfKVSymbol?.Construct(keyType, valueType)))
             {
                 collectionType = CollectionType.ImmutableDictionary;
                 return true;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.FrozenDictionaryOfKVSymbol?.Construct(keyType, valueType)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.FrozenDictionaryOfKVSymbol?.Construct(keyType, valueType)))
             {
                 collectionType = CollectionType.FrozenDictionary;
                 return true;
             }
 
-            if (simpleCliContext.SupportedDictionaryOfKVInterfaceSymbols.Any(s => SymbolEqualityComparer.Default.Equals(named, s.Construct(keyType, valueType))))
+            if (nativeCliContext.SupportedDictionaryOfKVInterfaceSymbols.Any(s => SymbolEqualityComparer.Default.Equals(named, s.Construct(keyType, valueType))))
             {
                 collectionType = CollectionType.DictionaryCompatible;
                 return true;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ListOfTSymbol?.Construct(keyValuePairSymbol)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.ListOfTSymbol?.Construct(keyValuePairSymbol)))
             {
                 collectionType = CollectionType.ListCompatible;
                 return true;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableArrayOfTSymbol?.Construct(keyValuePairSymbol)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.ImmutableArrayOfTSymbol?.Construct(keyValuePairSymbol)))
             {
                 collectionType = CollectionType.ImmutableArray;
                 return true;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableListOfTSymbol?.Construct(keyValuePairSymbol)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.ImmutableListOfTSymbol?.Construct(keyValuePairSymbol)))
             {
                 collectionType = CollectionType.ImmutableList;
                 return true;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.ImmutableHashSetOfTSymbol?.Construct(keyValuePairSymbol)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.ImmutableHashSetOfTSymbol?.Construct(keyValuePairSymbol)))
             {
                 collectionType = CollectionType.ImmutableHashSet;
                 return true;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(named, simpleCliContext.FrozenSetOfTSymbol?.Construct(keyValuePairSymbol)))
+            if (SymbolEqualityComparer.Default.Equals(named, nativeCliContext.FrozenSetOfTSymbol?.Construct(keyValuePairSymbol)))
             {
                 collectionType = CollectionType.FrozenSet;
                 return true;
             }
 
-            if (simpleCliContext.SupportedEnumerableOfTInterfaceSymbols.Any(s => SymbolEqualityComparer.Default.Equals(named, s.Construct(keyValuePairSymbol))))
+            if (nativeCliContext.SupportedEnumerableOfTInterfaceSymbols.Any(s => SymbolEqualityComparer.Default.Equals(named, s.Construct(keyValuePairSymbol))))
             {
                 collectionType = CollectionType.ListCompatible;
                 return true;
             }
 
-            var typedEnumerableSymbol = simpleCliContext.EnumerableOfTSymbol.Construct(keyValuePairSymbol);
+            var typedEnumerableSymbol = nativeCliContext.EnumerableOfTSymbol.Construct(keyValuePairSymbol);
             var constructor = named.InstanceConstructors.FirstOrDefault(c =>
                 c.DeclaredAccessibility == Accessibility.Public
                 &&

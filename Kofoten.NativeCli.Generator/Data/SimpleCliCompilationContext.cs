@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Kofoten.NativeCli.Generator.Data;
 
-internal record SimpleCliCompilationContext(
+internal record NativeCliCompilationContext(
     INamedTypeSymbol? CliParsableSymbol,
     INamedTypeSymbol? CliValidationResultSymbol,
     INamedTypeSymbol? CliArgumentAttributeSymbol,

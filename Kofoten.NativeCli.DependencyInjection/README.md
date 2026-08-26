@@ -1,6 +1,6 @@
-# Dependendy injection shim for Simple Cli
+# Dependendy injection shim for Native Cli
 
-This is a shim providing dependency injection capabilities for [Kofoten.NativeCli](https://github.com/Kofoten/simple-cli).
+This is a shim providing dependency injection capabilities for [Kofoten.NativeCli](https://github.com/Kofoten/native-cli).
 
 ## Usage
 

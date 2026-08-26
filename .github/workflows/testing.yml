@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: simple-cli-arc-runner
+    runs-on: native-cli-arc-runner
 
     steps:
       - name: Checkout Code
@@ -21,4 +21,4 @@ jobs:
         run: dotnet build --no-restore
 
       - name: Run Tests
-        run: dotnet run --verbosity normal --project ./Kofoten.SimpleCli.Test/Kofoten.SimpleCli.Test.csproj
+        run: dotnet run --verbosity normal --project ./Kofoten.NativeCli.Test/Kofoten.NativeCli.Test.csproj
