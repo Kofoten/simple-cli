@@ -1211,6 +1211,11 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         metadata.Add($"Allowed: {string.Join(", ", option.AllowedValueStrings)}");
                     }
 
+                    if (option.ImplicitValueString is not null)
+                    {
+                        metadata.Add($"Implicit: {option.ImplicitValueString}");
+                    }
+
                     if (metadata.Count > 0)
                     {
                         if (!string.IsNullOrEmpty(option.Description))
