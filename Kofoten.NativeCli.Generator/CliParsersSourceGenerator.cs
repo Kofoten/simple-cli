@@ -80,7 +80,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
             }
 
             return new NativeCliCompilationContext(
-                CliParsableSymbol: compilation.GetTypeByMetadataName("Kofoten.NativeCli.ICliParsable"),
+                CliParsableSymbol: compilation.GetTypeByMetadataName("Kofoten.NativeCli.Internal.ICliParsable"),
                 CliValidationResultSymbol: compilation.GetTypeByMetadataName("Kofoten.NativeCli.CliValidationResult"),
                 CliArgumentAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.NativeCli.CliArgumentAttribute"),
                 CliOptionAttributeSymbol: compilation.GetTypeByMetadataName("Kofoten.NativeCli.CliOptionAttribute"),
@@ -1257,7 +1257,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
 
                 code.AppendLine();
-                code.Append($"private static global::Kofoten.NativeCli.CliParseResult ParseCore(global::System.ArraySegment<string> args", applyIndent: true);
+                code.Append($"private static global::Kofoten.NativeCli.Internal.CliParseResult ParseCore(global::System.ArraySegment<string> args", applyIndent: true);
 
                 foreach (var ctorParam in command.ConstructorParameters)
                 {
@@ -1494,7 +1494,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                     code.AppendLine($"{dictionaryOpt.TypeName} finalOpt_{dictionaryOpt.Name} = global::System.Collections.Frozen.FrozenDictionary.ToFrozenDictionary<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>(opt_{dictionaryOpt.Name});");
                                     break;
                                 case CollectionType.DictionaryCompatible:
-                                    code.AppendLine($"var finalOpt_{dictionaryOpt.Name} = global::Kofoten.NativeCli.CliUtilities.CreateDictionaryWithOverwrite<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>(opt_{dictionaryOpt.Name});");
+                                    code.AppendLine($"var finalOpt_{dictionaryOpt.Name} = global::Kofoten.NativeCli.Internal.GeneratorHelperSources.CreateDictionaryWithOverwrite<{dictionaryOpt.KeyTypeName}, {dictionaryOpt.ValueTypeName}>(opt_{dictionaryOpt.Name});");
                                     break;
                             }
                         }
@@ -1532,12 +1532,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                                 code.AppendLine("case global::Kofoten.NativeCli.CliValidationResult.Success _:");
                                 using (code.Indent())
                                 {
-                                    code.AppendLine("return new global::Kofoten.NativeCli.CliParseResult.Success(command);");
+                                    code.AppendLine("return new global::Kofoten.NativeCli.Internal.CliParseResult.Success(command);");
                                 }
                                 code.AppendLine("case global::Kofoten.NativeCli.CliValidationResult.Failure f:");
                                 using (code.Indent())
                                 {
-                                    code.AppendLine("return new global::Kofoten.NativeCli.CliParseResult.Failure(f.Errors);");
+                                    code.AppendLine("return new global::Kofoten.NativeCli.Internal.CliParseResult.Failure(f.Errors);");
                                 }
                                 code.AppendLine("default:");
                                 using (code.Indent())
@@ -1548,12 +1548,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         }
                         else
                         {
-                            code.AppendLine("return new global::Kofoten.NativeCli.CliParseResult.Success(command);");
+                            code.AppendLine("return new global::Kofoten.NativeCli.Internal.CliParseResult.Success(command);");
                         }
                     }
 
                     code.AppendLine();
-                    code.AppendLine("return new global::Kofoten.NativeCli.CliParseResult.Failure(errors);");
+                    code.AppendLine("return new global::Kofoten.NativeCli.Internal.CliParseResult.Failure(errors);");
                 }
 
                 code.AppendLine();
@@ -1586,12 +1586,12 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     code.AppendLine("switch (result)");
                     using (code.StartBlock())
                     {
-                        code.AppendLine("case global::Kofoten.NativeCli.CliParseResult.Success success:");
+                        code.AppendLine("case global::Kofoten.NativeCli.Internal.CliParseResult.Success success:");
                         using (code.Indent())
                         {
                             code.AppendLine($"return ({command.ClassName})success.Parsable;");
                         }
-                        code.AppendLine("case global::Kofoten.NativeCli.CliParseResult.Failure failure:");
+                        code.AppendLine("case global::Kofoten.NativeCli.Internal.CliParseResult.Failure failure:");
                         using (code.Indent())
                         {
                             code.AppendLine("throw new CliParseException(failure.Errors, GetHelpText(global::System.String.Empty));");
@@ -1605,7 +1605,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
 
                 code.AppendLine();
-                code.Append($"{command.Accessibility} static void Map{command.ClassName}(this global::Kofoten.NativeCli.CliCommandRouter<global::System.Func<global::Kofoten.NativeCli.CliParseResult>> router, global::System.String verb", applyIndent: true);
+                code.Append($"{command.Accessibility} static void Map{command.ClassName}(this global::Kofoten.NativeCli.CliCommandRouter<global::System.Func<global::Kofoten.NativeCli.Internal.CliParseResult>> router, global::System.String verb", applyIndent: true);
 
                 foreach (var ctorParam in command.ConstructorParameters)
                 {
@@ -1641,7 +1641,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 }
 
                 code.AppendLine();
-                code.AppendLine($"private class {command.ClassName}Factory : global::Kofoten.NativeCli.ICliCommandFactory<global::System.Func<global::Kofoten.NativeCli.CliParseResult>>");
+                code.AppendLine($"private class {command.ClassName}Factory : global::Kofoten.NativeCli.Internal.ICliCommandFactory<global::System.Func<global::Kofoten.NativeCli.Internal.CliParseResult>>");
                 using (code.StartBlock())
                 {
                     foreach (var ctorParam in command.ConstructorParameters)
@@ -1675,7 +1675,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
 
                     code.AppendLine();
-                    code.AppendLine($"public global::System.Func<global::Kofoten.NativeCli.CliParseResult> GetFactoryFunction(global::System.ArraySegment<string> args)");
+                    code.AppendLine($"public global::System.Func<global::Kofoten.NativeCli.Internal.CliParseResult> GetFactoryFunction(global::System.ArraySegment<string> args)");
                     using (code.StartBlock())
                     {
                         code.Append($"return () => {command.ClassName}Parser.ParseCore(args", applyIndent: true);
@@ -1694,7 +1694,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                 if (command.HasDependencyInjection)
                 {
                     code.AppendLine();
-                    code.AppendLine($"{command.Accessibility} static void Map{command.ClassName}(this global::Kofoten.NativeCli.CliCommandRouter<global::System.Func<global::System.IServiceProvider, global::Kofoten.NativeCli.CliParseResult>> router, global::System.String verb)");
+                    code.AppendLine($"{command.Accessibility} static void Map{command.ClassName}(this global::Kofoten.NativeCli.CliCommandRouter<global::System.Func<global::System.IServiceProvider, global::Kofoten.NativeCli.Internal.CliParseResult>> router, global::System.String verb)");
                     using (code.StartBlock())
                     {
                         code.AppendLine("if (router is null)");
@@ -1712,7 +1712,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                     }
 
                     code.AppendLine();
-                    code.AppendLine($"private class DependencyInjection{command.ClassName}Factory : global::Kofoten.NativeCli.ICliCommandFactory<global::System.Func<global::System.IServiceProvider, global::Kofoten.NativeCli.CliParseResult>>");
+                    code.AppendLine($"private class DependencyInjection{command.ClassName}Factory : global::Kofoten.NativeCli.Internal.ICliCommandFactory<global::System.Func<global::System.IServiceProvider, global::Kofoten.NativeCli.Internal.CliParseResult>>");
                     using (code.StartBlock())
                     {
                         code.AppendLine("public global::System.Boolean IsLeaf => true;");
@@ -1725,7 +1725,7 @@ public class CliParsersSourceGenerator : IIncrementalGenerator
                         }
 
                         code.AppendLine();
-                        code.AppendLine($"public global::System.Func<global::System.IServiceProvider, global::Kofoten.NativeCli.CliParseResult> GetFactoryFunction(global::System.ArraySegment<string> args)");
+                        code.AppendLine($"public global::System.Func<global::System.IServiceProvider, global::Kofoten.NativeCli.Internal.CliParseResult> GetFactoryFunction(global::System.ArraySegment<string> args)");
                         using (code.StartBlock())
                         {
                             code.AppendLine("return (sp) =>");

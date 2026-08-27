@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Kofoten.NativeCli.Internal;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 

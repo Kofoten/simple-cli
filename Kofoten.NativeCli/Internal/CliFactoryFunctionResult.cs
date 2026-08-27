@@ -1,7 +1,17 @@
 ﻿using System.Collections.Generic;
+using System.ComponentModel;
 
-namespace Kofoten.NativeCli;
+namespace Kofoten.NativeCli.Internal;
 
+/// <summary>
+/// Represents the result of a factory function resolution that creates a CLI command or parser.
+/// This type acts as a discriminated union and is designed to be evaluated using C# pattern matching.
+/// </summary>
+/// <remarks>
+/// While this type is public to allow pattern matching via switch expressions, its constructors are internal. 
+/// It is not intended to be extended or instantiated directly outside of the Kofoten.NativeCli library.
+/// </remarks>
+[EditorBrowsable(EditorBrowsableState.Never)]
 public abstract record CliFactoryFunctionResult<TFactoryFunction>
 {
     public string HelpText { get; private set; }

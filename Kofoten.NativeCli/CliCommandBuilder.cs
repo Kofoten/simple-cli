@@ -1,7 +1,11 @@
-﻿using System;
+﻿using Kofoten.NativeCli.Internal;
+using System;
 
 namespace Kofoten.NativeCli;
 
+/// <summary>
+/// A builder for configuring and registering CLI commands. It allows you to define command routes, handle exceptions, and resolve commands based on provided arguments.
+/// </summary>
 public sealed class CliCommandBuilder
 {
     private readonly CliCommandRouter<Func<CliParseResult>> router;

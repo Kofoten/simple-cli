@@ -1,4 +1,6 @@
-﻿namespace Kofoten.NativeCli;
+﻿using Kofoten.NativeCli.Internal;
+
+namespace Kofoten.NativeCli;
 
 public interface ICliCommand : ICliParsable
 {

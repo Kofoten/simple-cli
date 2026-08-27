@@ -1,10 +1,18 @@
 ﻿using System.Collections.Generic;
+using System.ComponentModel;
 
-namespace Kofoten.NativeCli;
+namespace Kofoten.NativeCli.Internal;
 
+/// <summary>
+/// Represents the result of parsing command-line arguments into a CLI parsable object. It can either be a success, containing the parsed object, or a failure, containing a list of error messages.
+/// </summary>
+/// <remarks>
+/// This class is intended for use by the generated parser and should not be used directly by user code.
+/// </remarks>
+[EditorBrowsable(EditorBrowsableState.Never)]
 public abstract record CliParseResult
 {
-    protected internal CliParseResult()
+    internal CliParseResult()
     {
     }
 
