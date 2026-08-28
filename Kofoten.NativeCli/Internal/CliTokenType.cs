@@ -6,4 +6,5 @@ public enum CliTokenType
     Value,
     Option,
     KnownOption,
+    EndOfOptions,
 }
